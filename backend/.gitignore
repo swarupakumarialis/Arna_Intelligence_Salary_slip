@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+
+# Runtime-generated content — keep the folders (via .gitkeep), not their contents
+uploads/*
+!uploads/.gitkeep
+generated-pdfs/*
+!generated-pdfs/.gitkeep
+
+npm-debug.log*
+*.log
+
+.DS_Store

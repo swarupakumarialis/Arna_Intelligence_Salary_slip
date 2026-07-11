@@ -1,0 +1,41 @@
+# ===============================
+# Frontend
+# ===============================
+node_modules/
+dist/
+build/
+coverage/
+
+# ===============================
+# Backend
+# ===============================
+backend/node_modules/
+backend/dist/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Generated files
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+backend/generated-pdfs/*
+!backend/generated-pdfs/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
