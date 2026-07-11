@@ -1,23 +1,49 @@
 /**
- * Generic 404 + error-handling middleware. This is infrastructure, not
- * business logic — every future route (employees, salary, auth, …)
- * benefits from the same consistent JSON error shape without each one
- * having to implement it. Mounted last in src/app.js, after all routes.
+ * Generic 404 + error-handling middleware, shared by every route.
+ * Every response — success or failure — uses the same envelope
+ * ({ success, message, data }), so the frontend's API layer
+ * (frontend/src/api/employeeApi.ts) only has to understand one shape.
+ * Mounted last in src/app.js, after all feature routers.
  */
 
-export function notFound(req, res, next) {
+export function notFound(req, res) {
   res.status(404).json({
-    status: 'error',
+    success: false,
     message: `Route not found: ${req.method} ${req.originalUrl}`,
+    data: null,
   });
 }
 
 // eslint-disable-next-line no-unused-vars
 export function errorHandler(err, req, res, next) {
   console.error('[error]', err);
-  const statusCode = err.statusCode || 500;
+
+  // AppError (services/controllers) already carries the right HTTP status.
+  let statusCode = err.statusCode || 500;
+  let message = err.message || 'Internal Server Error';
+
+  // Mongoose validation errors → 400, with a readable combined message.
+  if (err.name === 'ValidationError') {
+    statusCode = 400;
+    message = Object.values(err.errors).map((e) => e.message).join(', ');
+  }
+
+  // Mongoose duplicate-key errors that reach here uncaught → 409.
+  if (err.code === 11000) {
+    statusCode = 409;
+    const field = Object.keys(err.keyPattern || err.keyValue || {})[0] || 'field';
+    message = `Duplicate value for ${field}.`;
+  }
+
+  // Malformed ObjectId passed straight to Mongoose (bypassing service-level checks) → 400.
+  if (err.name === 'CastError') {
+    statusCode = 400;
+    message = `Invalid value for ${err.path}.`;
+  }
+
   res.status(statusCode).json({
-    status: 'error',
-    message: err.message || 'Internal Server Error',
+    success: false,
+    message,
+    data: null,
   });
 }

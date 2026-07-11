@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { isDatabaseConnected } from './config/database.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import employeeRoutes from './routes/employee.routes.js';
 
 /**
  * Express app configuration — separated from server.js (which owns
@@ -43,7 +44,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Future feature routers (employees, salary, auth, …) mount here, above notFound/errorHandler.
+app.use('/api/employees', employeeRoutes);
+
+// Future feature routers (salary, auth, …) mount here, above notFound/errorHandler.
 
 app.use(notFound);
 app.use(errorHandler);
