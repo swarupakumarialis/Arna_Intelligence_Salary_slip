@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Employee, EmploymentType } from '../types';
-import { loadEmployees, saveEmployees } from '../utils/employeeStore';
-import { Plus, Trash2, Pencil, Eye, X, Search, Users, ArrowLeft, Upload, User, Mail, Phone, Building2 } from 'lucide-react';
+import { createEmployee, updateEmployee, deleteEmployee, ApiError } from '../api/employeeApi';
+import { Plus, Trash2, Pencil, Eye, X, Search, Users, ArrowLeft, Upload, User, Mail, Phone, Building2, Loader2, AlertTriangle } from 'lucide-react';
 import { EmployeeAvatar } from './ui/EmployeeAvatar';
 import { StatusBadge } from './ui/StatusBadge';
 import { EmptyState } from './ui/EmptyState';
@@ -10,7 +10,15 @@ import { EmptyState } from './ui/EmptyState';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Called with the full, up-to-date list after every add/edit/delete. */
+  /** The one shared Employee Directory list, owned by App.tsx (fetched
+      once from GET /api/employees) and passed down as a plain prop —
+      this component never fetches its own copy. Every other screen
+      that shows employee data (Salary Generator, Dashboard, …) reads
+      the exact same array. */
+  employees: Employee[];
+  /** Called with the full, up-to-date list after every add/edit/delete —
+      this is how App.tsx's shared state picks up the change immediately,
+      no refetch needed. */
   onEmployeesChange: (employees: Employee[]) => void;
   /** Display name for this directory — defaults to a generic label so
       the component works out of the box for any company; App.tsx sets
@@ -74,37 +82,49 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
   );
 }
 
-export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Employee Master', onEmployeeAdded, onEmployeeUpdated, onEmployeeDeleted }: Props) {
-  const [employees, setEmployees] = useState<Employee[]>(loadEmployees);
+/** Backend-unreachable vs. backend-responded-with-an-error read very
+    differently to a user — the former means "try again later" (toast),
+    the latter is actionable right where they're typing (inline). An
+    ApiError with no `status` never got an HTTP response at all, which
+    is exactly the network-level "server unreachable" case. */
+function isConnectionError(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.status === undefined;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+export function EmployeeMaster({ isOpen, onClose, employees, onEmployeesChange, title = 'Employee Master', onEmployeeAdded, onEmployeeUpdated, onEmployeeDeleted }: Props) {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Employee | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState('');
   const [viewing, setViewing] = useState<Employee | null>(null);
   const [viewTab, setViewTab] = useState<'personal' | 'employment' | 'bank' | 'documents' | 'salary'>('personal');
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [toast, setToast] = useState('');
 
-  if (!isOpen) return null;
-
-  const persist = (next: Employee[]) => {
-    setEmployees(next);
-    saveEmployees(next);
-    onEmployeesChange(next);
-  };
-
-  /* Search every field — text fields matched by substring, dates/status
-     matched as their displayed values too, so "inactive" or "2026-01"
-     work just as well as a name or department. */
-  const filtered = employees.filter(e => {
+  /* Client-side filter over the shared `employees` prop — no network
+     call. The whole directory is already loaded (App.tsx fetches it
+     once on startup), so there's nothing a server round-trip would add
+     here except latency; searching the array in memory keeps this the
+     one and only place employee data is read from, per the "no
+     duplicate fetches" rule. */
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return true;
-    const haystack = [
+    if (!q) return employees;
+    const haystack = (e: Employee) => [
       e.name, e.employeeId, e.department, e.designation, e.employmentType,
       e.email, e.phone, e.address, e.pan, e.aadhaar, e.bankAccount, e.bankName, e.branch, e.ifsc, e.uan,
       e.manager, e.emergencyContact, e.doj, e.employmentEndDate, e.notes,
       e.salaryStructureNote, e.status,
     ];
-    return haystack.some(v => (v || '').toLowerCase().includes(q));
-  });
+    return employees.filter(e => haystack(e).some(v => (v || '').toLowerCase().includes(q)));
+  }, [employees, search]);
+
+  if (!isOpen) return null;
 
   const startAdd = () => {
     setEditing(emptyEmployee());
@@ -119,37 +139,52 @@ export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Em
   };
 
   const cancelForm = () => {
+    if (saving) return;
     setShowForm(false);
     setEditing(null);
     setFormError('');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editing) return;
     if (!editing.employeeId.trim() || !editing.name.trim()) {
       setFormError('Employee ID and Employee Name are required.');
       return;
     }
-    const duplicate = employees.some(
-      e => e.id !== editing.id && e.employeeId.trim().toLowerCase() === editing.employeeId.trim().toLowerCase()
-    );
-    if (duplicate) {
-      setFormError('An employee with this Employee ID already exists.');
-      return;
+    setSaving(true);
+    setFormError('');
+    try {
+      const exists = employees.some(e => e.id === editing.id);
+      const saved = exists ? await updateEmployee(editing.id, editing) : await createEmployee(editing);
+      const next = exists ? employees.map(e => (e.id === saved.id ? saved : e)) : [...employees, saved];
+      onEmployeesChange(next);
+      if (exists) onEmployeeUpdated?.(saved); else onEmployeeAdded?.(saved);
+      setShowForm(false);
+      setEditing(null);
+    } catch (err) {
+      if (isConnectionError(err)) {
+        setToast(errorMessage(err, 'Unable to connect to server'));
+      } else {
+        setFormError(errorMessage(err, 'Failed to save employee. Please try again.'));
+      }
+    } finally {
+      setSaving(false);
     }
-    const exists = employees.some(e => e.id === editing.id);
-    const next = exists
-      ? employees.map(e => (e.id === editing.id ? editing : e))
-      : [...employees, editing];
-    persist(next);
-    if (exists) onEmployeeUpdated?.(editing); else onEmployeeAdded?.(editing);
-    cancelForm();
   };
 
-  const handleDelete = (emp: Employee) => {
+  const handleDelete = async (emp: Employee) => {
     if (!window.confirm(`Delete ${emp.name || emp.employeeId}? This cannot be undone.`)) return;
-    persist(employees.filter(e => e.id !== emp.id));
-    onEmployeeDeleted?.(emp);
+    setDeletingId(emp.id);
+    setToast('');
+    try {
+      await deleteEmployee(emp.id);
+      onEmployeesChange(employees.filter(e => e.id !== emp.id));
+      onEmployeeDeleted?.(emp);
+    } catch (err) {
+      setToast(errorMessage(err, 'Unable to connect to server'));
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return createPortal(
@@ -158,6 +193,21 @@ export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Em
       style={{ background: 'rgba(15,23,42,0.55)', zIndex: 9999 }}
       onClick={onClose}
     >
+      {toast && (
+        <div
+          style={{
+            position: 'fixed', top: 16, right: 16, zIndex: 10010,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 16px', background: 'var(--clr-danger)', color: '#fff',
+            borderRadius: 8, fontSize: 13, fontWeight: 500,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)', maxWidth: 360,
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          {toast}
+        </div>
+      )}
       <div
         style={{
           background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800,
@@ -229,8 +279,8 @@ export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Em
                 <EmptyState
                   compact
                   icon={Users}
-                  title={employees.length === 0 ? 'No employees yet' : 'No matches found'}
-                  description={employees.length === 0 ? 'Click "Add Employee" to create the first record.' : 'Try a different search term.'}
+                  title={search.trim() ? 'No matches found' : 'No employees yet'}
+                  description={search.trim() ? 'Try a different search term.' : 'Click "Add Employee" to create the first record.'}
                 />
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(232px, 1fr))', gap: 12 }}>
@@ -269,21 +319,22 @@ export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Em
                       </div>
 
                       <div style={{ display: 'flex', gap: 2, marginTop: 2, borderTop: '1px solid var(--clr-border)', paddingTop: 8, justifyContent: 'flex-end' }}>
-                        <button onClick={() => { setViewing(emp); setViewTab('personal'); }} title="View Employee" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}>
+                        <button onClick={() => { setViewing(emp); setViewTab('personal'); }} title="View Employee" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }} disabled={deletingId === emp.id}>
                           <Eye size={13} />
                         </button>
-                        <button onClick={() => startEdit(emp)} title="Edit" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}>
+                        <button onClick={() => startEdit(emp)} title="Edit" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }} disabled={deletingId === emp.id}>
                           <Pencil size={13} />
                         </button>
                         <button
                           onClick={() => handleDelete(emp)}
                           title="Delete"
                           className="btn-icon"
-                          style={{ border: 'none', cursor: 'pointer' }}
+                          style={{ border: 'none', cursor: deletingId === emp.id ? 'default' : 'pointer' }}
+                          disabled={deletingId === emp.id}
                           onMouseEnter={e => { e.currentTarget.style.color = 'var(--clr-danger)'; }}
                           onMouseLeave={e => { e.currentTarget.style.color = 'var(--clr-text-muted)'; }}
                         >
-                          <Trash2 size={13} />
+                          {deletingId === emp.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                         </button>
                       </div>
                     </div>
@@ -384,8 +435,11 @@ export function EmployeeMaster({ isOpen, onClose, onEmployeesChange, title = 'Em
               )}
 
               <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
-                <button onClick={cancelForm} className="btn btn-secondary" style={{ fontSize: 12.5 }}>Cancel</button>
-                <button onClick={handleSave} className="btn btn-dark" style={{ fontSize: 12.5 }}>Save Employee</button>
+                <button onClick={cancelForm} disabled={saving} className="btn btn-secondary" style={{ fontSize: 12.5, opacity: saving ? 0.6 : 1 }}>Cancel</button>
+                <button onClick={handleSave} disabled={saving} className="btn btn-dark" style={{ fontSize: 12.5, opacity: saving ? 0.7 : 1 }}>
+                  {saving && <Loader2 size={13} className="animate-spin" />}
+                  {saving ? 'Saving…' : 'Save Employee'}
+                </button>
               </div>
             </div>
           )

@@ -10,10 +10,8 @@ import { Download, Loader2, AlertTriangle, X, CheckCircle2, FileText } from 'luc
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { defaultTaxConfigs } from './utils/taxCalculator';
-import { seedEmployeesIfEmpty, applyEmployeeEnrichment } from './utils/employeeStore';
+import { getEmployees, ApiError } from './api/employeeApi';
 import { calculateLop, LOP_DEDUCTION_ID } from './utils/payroll';
-import { arnaTeamSeed } from './data/arnaTeamSeed';
-import { ARNA_EMPLOYEE_ENRICHMENT, ARNA_EMPLOYEE_ENRICHMENT_FLAG } from './data/arnaEmployeeEnrichment';
 import type { BrandConfig } from './utils/companySettingsStore';
 import { DEFAULT_BRAND, loadCompanySettings, saveCompanySettings } from './utils/companySettingsStore';
 import { SalaryHistoryRecord } from './types';
@@ -56,25 +54,19 @@ export { LOP_DEDUCTION_ID };
 export type { BrandConfig };
 
 /* ─── Company bootstrap config ──────────────────────────────────
-   The lines below are the only company-specific wiring in the whole
-   app. To stand this up for a different company: point
-   ACTIVE_EMPLOYEE_SEED at that company's own `Employee[]` seed file
-   (see src/data/arnaTeamSeed.ts for the shape and the pattern to
-   copy), and update TEAM_DIRECTORY_TITLE / APP_NAME. Nothing in
-   employeeStore.ts, EmployeeMaster.tsx, or the Employee type needs to
-   change. APP_NAME is the software's own product name (shown in the
-   top nav); it's intentionally separate from BrandConfig.companyName,
-   which is the tenant's legal entity name shown on the payslip. */
-const ACTIVE_EMPLOYEE_SEED = arnaTeamSeed;
+   The employee directory itself now lives in MongoDB (see
+   src/api/employeeApi.ts and the `employees` state below) — the only
+   company-specific wiring left in the whole app is display naming.
+   To stand this up for a different company: update TEAM_DIRECTORY_TITLE
+   / APP_NAME. APP_NAME is the software's own product name (shown in
+   the top nav); it's intentionally separate from BrandConfig.companyName,
+   which is the tenant's legal entity name shown on the payslip.
+   src/utils/employeeStore.ts, src/data/arnaTeamSeed.ts, and
+   src/data/arnaEmployeeEnrichment.ts are no longer used (Sprint 5.2
+   migrated the directory to the backend) but are kept, unmodified,
+   until the migration is fully verified. */
 const TEAM_DIRECTORY_TITLE = 'ARNA Team Directory';
 const APP_NAME = 'ARNA Salary Suite';
-/* One-time field enrichment for installations that were already seeded
-   before this data existed — see applyEmployeeEnrichment() in
-   utils/employeeStore.ts and src/data/arnaEmployeeEnrichment.ts. Swap
-   alongside ACTIVE_EMPLOYEE_SEED when adapting this app for another
-   company (or drop to {} / a fresh flag if there's nothing to enrich). */
-const ACTIVE_EMPLOYEE_ENRICHMENT = ARNA_EMPLOYEE_ENRICHMENT;
-const ACTIVE_EMPLOYEE_ENRICHMENT_FLAG = ARNA_EMPLOYEE_ENRICHMENT_FLAG;
 
 /* ─── Validation types ─────────────────────────────────────── */
 export interface FormErrors {
@@ -174,21 +166,14 @@ export default function App() {
   const [validationErrors, setValidationErrors] = useState<FormErrors>({});
   const [showValidationDialog, setShowValidationDialog] = useState(false);
   const [touchedFields, setTouchedFields] = useState<TouchedFields>({});
-  /* Lazy initializer — runs exactly once, on first render, before
-     anything else touches the employee directory. seedEmployeesIfEmpty
-     itself checks localStorage first, so this is safe to call on
-     every app start: it only ever writes when the directory is empty.
-     applyEmployeeEnrichment runs right after — it targets installs that
-     were already seeded before the enrichment data existed, and is
-     itself gated by its own one-time flag, so it's equally safe to call
-     on every app start. */
-  const [employees, setEmployees] = useState<Employee[]>(() =>
-    applyEmployeeEnrichment(
-      seedEmployeesIfEmpty(ACTIVE_EMPLOYEE_SEED),
-      ACTIVE_EMPLOYEE_ENRICHMENT,
-      ACTIVE_EMPLOYEE_ENRICHMENT_FLAG
-    )
-  );
+  /* Employee Directory — Sprint 5.2 moved this from localStorage
+     (utils/employeeStore.ts) to MongoDB via the backend API (see
+     src/api/employeeApi.ts). Starts empty and is populated by the
+     effect below; EmployeeMaster.tsx re-fetches/re-syncs this same
+     state whenever the directory modal is opened, so this initial
+     load is really just "have something to show the Salary Generator
+     dropdown and Dashboard panels before the user opens the directory." */
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [showEmployeeMaster, setShowEmployeeMaster] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [salaryHistory, setSalaryHistory] = useState<SalaryHistoryRecord[]>(loadSalaryHistory);
@@ -209,6 +194,26 @@ export default function App() {
      SalarySlipPreview. Export captures this node now, not the preview. */
   const pdfRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+
+  /* Loads the Employee Directory from the backend once on mount. This
+     is the app-wide `employees` list consumed by the Salary Generator's
+     "Select Employee" dropdown and the Dashboard panels; EmployeeMaster
+     (the directory modal) keeps it in sync afterwards via
+     onEmployeesChange every time it opens or a record is added/edited/
+     deleted, so this effect only needs to run once. */
+  useEffect(() => {
+    let cancelled = false;
+    getEmployees({ limit: 1000 })
+      .then(result => {
+        if (!cancelled) setEmployees(result.items);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setPdfError(err instanceof ApiError ? err.message : 'Unable to connect to server');
+        setTimeout(() => setPdfError(null), 5000);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   /* Re-run validation on every data/brand change so errors clear as user types */
   useEffect(() => {
@@ -308,10 +313,13 @@ export default function App() {
     root.style.setProperty('--brand-secondary', brand.secondaryColour || '#5EEAD4');
   }, [brand.primaryColour, brand.secondaryColour]);
 
-  /* Autofill the employee block from a saved Employee Master record.
-     Bank name and email aren't tracked by Employee Master, so they're
-     cleared rather than carried over from whichever employee was
-     previously selected. */
+  /* Autofill the employee block from a saved Employee Directory record
+     — every field it holds comes straight from MongoDB (via the shared
+     `employees` state), with no locally-typed fallback. Email and bank
+     name used to be blanked out here under the (now stale) assumption
+     that Employee Master didn't track them; both are real fields on
+     the backend Employee model, so they're carried over like everything
+     else. */
   const handleSelectEmployee = useCallback((recordId: string) => {
     const emp = employees.find(e => e.id === recordId);
     if (!emp) return;
@@ -326,9 +334,9 @@ export default function App() {
         doj: emp.doj,
         panNumber: emp.pan || '',
         bankAccount: emp.bankAccount || '',
-        bankName: '',
+        bankName: emp.bankName || '',
         ifscCode: emp.ifsc || '',
-        email: '',
+        email: emp.email || '',
       },
     }));
   }, [employees]);
@@ -767,6 +775,7 @@ export default function App() {
       <EmployeeMaster
         isOpen={showEmployeeMaster}
         onClose={() => setShowEmployeeMaster(false)}
+        employees={employees}
         onEmployeesChange={setEmployees}
         title={TEAM_DIRECTORY_TITLE}
         onEmployeeAdded={handleEmployeeAdded}
