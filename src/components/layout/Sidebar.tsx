@@ -1,7 +1,7 @@
 import React from 'react';
-import { LayoutDashboard, Receipt, Users, History, FileSpreadsheet, Settings } from 'lucide-react';
+import { LayoutDashboard, Receipt, Users, History, FileSpreadsheet, Settings, FolderOpen, Calculator } from 'lucide-react';
 
-export type SidebarKey = 'dashboard' | 'generator' | 'directory' | 'history' | 'export' | 'settings';
+export type SidebarKey = 'dashboard' | 'generator' | 'directory' | 'history' | 'export' | 'documents' | 'taxcenter' | 'settings';
 
 interface NavItem {
   key: SidebarKey;
@@ -42,12 +42,14 @@ export function Sidebar({ activeKey, onNavigate, teamDirectoryLabel }: Props) {
         { key: 'generator', label: 'Salary Generator', icon: Receipt },
         { key: 'history', label: 'Salary History', icon: History },
         { key: 'export', label: 'Payroll Export', icon: FileSpreadsheet },
+        { key: 'taxcenter', label: 'Tax Center', icon: Calculator },
       ],
     },
     {
       label: 'Organisation',
       items: [
         { key: 'directory', label: teamDirectoryLabel, icon: Users },
+        { key: 'documents', label: 'Documents', icon: FolderOpen },
         { key: 'settings', label: 'Company Settings', icon: Settings },
       ],
     },

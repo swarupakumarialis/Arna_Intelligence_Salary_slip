@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { SalaryData, SalaryItem, Employee } from '../types';
-import { Plus, Trash2, CircleDollarSign, Users, Lock, CalendarDays } from 'lucide-react';
+import { Plus, Trash2, CircleDollarSign, Users, Lock, CalendarDays, UserCog, PhoneCall } from 'lucide-react';
 import { FormErrors, TouchedFields, LOP_DEDUCTION_ID } from '../App';
 import { calculateLop } from '../utils/payroll';
 import { StatusBadge } from './ui/StatusBadge';
@@ -20,6 +20,41 @@ interface Props {
   /** Display name for the employee directory (defaults to a generic
       label so this form works standalone for any company). */
   employeeDirectoryTitle?: string;
+}
+
+/* Standard component names for the "Quick add" chips below the
+   Earnings/Deductions lists (Sprint 5.7). Purely a naming convenience —
+   clicking one just calls addEarningNamed/addDeductionNamed, which
+   pre-fills a normal SalaryItem row's `name` the same as typing it by
+   hand. No new field, no schema change; still one flat, freely-named
+   earnings/deductions array underneath, exactly as before. */
+const STANDARD_EARNINGS = ['Basic Pay', 'HRA', 'Special Allowance', 'Medical', 'Conveyance', 'Bonus', 'Other Allowances'];
+const STANDARD_DEDUCTIONS = ['PF', 'ESI', 'Professional Tax', 'TDS', 'Other Deductions'];
+
+function QuickAddChips({ names, onAdd }: { names: string[]; onAdd: (name: string) => void }) {
+  if (names.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+      {names.map(name => (
+        <button
+          key={name}
+          type="button"
+          onClick={() => onAdd(name)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            padding: '3px 8px', borderRadius: 999,
+            border: '1px dashed var(--clr-border)', background: 'transparent',
+            fontSize: 10.5, fontWeight: 600, color: 'var(--clr-text-subtle)', cursor: 'pointer',
+            transition: 'all 150ms',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--arna-accent)'; e.currentTarget.style.color = 'var(--arna-accent)'; e.currentTarget.style.background = '#F0FDFA'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--clr-border)'; e.currentTarget.style.color = 'var(--clr-text-subtle)'; e.currentTarget.style.background = 'transparent'; }}
+        >
+          <Plus size={9} /> {name}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /* ─── Sub-components ──────────────────────────────────────── */
@@ -249,6 +284,15 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
   /* Earnings */
   const addEarning = () =>
     onChange({ ...data, earnings: [...data.earnings, { id: Date.now().toString(), name: '', amount: 0 }] });
+  /* Quick-add a standard component by name (Sprint 5.7 — "prepare UI
+     for structured salary components" without changing the underlying
+     free-text SalaryItem[] model: this just pre-fills the name field
+     of a normal new row, same as typing it in by hand). Skips adding a
+     duplicate if a row with that name (case-insensitive) already exists. */
+  const addEarningNamed = (name: string) => {
+    if (data.earnings.some(e => e.name.trim().toLowerCase() === name.toLowerCase())) return;
+    onChange({ ...data, earnings: [...data.earnings, { id: Date.now().toString(), name, amount: 0 }] });
+  };
   const removeEarning = (id: string) =>
     onChange({ ...data, earnings: data.earnings.filter(e => e.id !== id) });
   const updateEarning = (id: string, f: keyof SalaryItem, v: string | number) =>
@@ -257,6 +301,10 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
   /* Deductions */
   const addDeduction = () =>
     onChange({ ...data, deductions: [...data.deductions, { id: Date.now().toString(), name: '', amount: 0 }] });
+  const addDeductionNamed = (name: string) => {
+    if (data.deductions.some(d => d.name.trim().toLowerCase() === name.toLowerCase())) return;
+    onChange({ ...data, deductions: [...data.deductions, { id: Date.now().toString(), name, amount: 0 }] });
+  };
   const removeDeduction = (id: string) =>
     onChange({ ...data, deductions: data.deductions.filter(d => d.id !== id) });
   const updateDeduction = (id: string, f: keyof SalaryItem, v: string | number) =>
@@ -349,24 +397,67 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
 
           {/* Compact summary of the matched directory record, if any */}
           {selectedEmployee && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '12px 14px', borderRadius: 10,
-              border: '1px solid color-mix(in srgb, var(--arna-accent) 35%, var(--clr-border))',
+            <div className="animate-fade-in-up" style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px 16px', borderRadius: 12,
+              border: '1px solid color-mix(in srgb, var(--arna-accent) 30%, var(--clr-border))',
               borderLeft: '3px solid var(--arna-accent)',
-              background: 'color-mix(in srgb, var(--arna-accent) 5%, white)',
+              background: 'linear-gradient(135deg, color-mix(in srgb, var(--arna-accent) 7%, white), white 65%)',
               boxShadow: 'var(--shadow-sm)',
             }}>
-              <EmployeeAvatar name={selectedEmployee.name} photoDataUri={selectedEmployee.photoDataUri} size={38} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--clr-text)' }}>
+              <EmployeeAvatar name={selectedEmployee.name} photoDataUri={selectedEmployee.photoDataUri} size={48} />
+              {/* minWidth: 0 at every flex level below (this block, the
+                  name row, and the name span itself) is what actually
+                  lets long content truncate/wrap in place instead of
+                  forcing this card — and therefore the whole form
+                  column — wider (Sprint 5.6.1). A flex item's default
+                  min-width is `auto` (its content's min-content size),
+                  which for nowrap text is its full unbroken width; only
+                  an explicit minWidth: 0 overrides that. */}
+              <div style={{ flex: '1 1 0', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, minWidth: 0 }}>
+                  <span style={{
+                    fontSize: 13.5, fontWeight: 800, color: 'var(--clr-text)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, flex: '0 1 auto',
+                  }}>
+                    {selectedEmployee.name}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--arna-slate)', flexShrink: 0,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    background: 'var(--clr-bg)', border: '1px solid var(--clr-border)',
+                    borderRadius: 5, padding: '1px 6px',
+                  }}>
+                    {selectedEmployee.employeeId}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--clr-text)', overflowWrap: 'break-word' }}>
                   {selectedEmployee.designation || '—'}
                   {selectedEmployee.employmentType && <span style={{ color: 'var(--clr-text-subtle)', fontWeight: 500 }}> · {selectedEmployee.employmentType}</span>}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>
+                <div style={{ fontSize: 11, color: 'var(--clr-text-muted)', marginTop: 1, overflowWrap: 'break-word' }}>
                   {selectedEmployee.department || '—'}
                   {selectedEmployee.doj && ` · Joined ${new Date(selectedEmployee.doj).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`}
                 </div>
+                {/* Manager / Emergency Contact — only rendered when at
+                    least one is on file, so employees without either
+                    don't get an empty row (Sprint 5.7). Same
+                    overflowWrap safety as the lines above. */}
+                {(selectedEmployee.manager || selectedEmployee.emergencyContact) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 10.5, color: 'var(--clr-text-subtle)', marginTop: 4 }}>
+                    {selectedEmployee.manager && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, overflowWrap: 'break-word' }}>
+                        <UserCog size={10} style={{ flexShrink: 0 }} /> {selectedEmployee.manager}
+                      </span>
+                    )}
+                    {selectedEmployee.emergencyContact && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, overflowWrap: 'break-word' }}>
+                        <PhoneCall size={10} style={{ flexShrink: 0 }} /> {selectedEmployee.emergencyContact}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <StatusBadge label={selectedEmployee.status} tone={selectedEmployee.status === 'Active' ? 'success' : 'neutral'} />
             </div>
@@ -504,6 +595,10 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
                   <Plus size={12} /> Add
                 </button>
               </div>
+              <QuickAddChips
+                names={STANDARD_EARNINGS.filter(n => !data.earnings.some(e => e.name.trim().toLowerCase() === n.toLowerCase()))}
+                onAdd={addEarningNamed}
+              />
               {/* Basic salary validation banner */}
               {touched.basicSalary && errors.basicSalary && (
                 <div style={{
@@ -536,6 +631,10 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
             {/* Deductions */}
             <div>
               <SalaryColHeader label="Deductions" onAdd={addDeduction} />
+              <QuickAddChips
+                names={STANDARD_DEDUCTIONS.filter(n => !data.deductions.some(d => d.name.trim().toLowerCase() === n.toLowerCase()))}
+                onAdd={addDeductionNamed}
+              />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {data.deductions.map(item => (
                   <React.Fragment key={item.id}>

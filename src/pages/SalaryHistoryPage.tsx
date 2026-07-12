@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { SalaryHistoryRecord } from '../types';
-import { Eye, FileEdit, Copy, Download, Trash2, History, ArrowUpDown, X } from 'lucide-react';
+import { Eye, FileEdit, Copy, Download, Trash2, History, ArrowUpDown, X, Loader2 } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { TableToolbar, SearchInput } from '../components/ui/TableToolbar';
@@ -8,12 +8,15 @@ import { useCurrency } from '../contexts/CurrencyContext';
 
 interface Props {
   records: SalaryHistoryRecord[];
+  /** True only until the initial App.tsx fetch settles — distinguishes
+      "still loading" from a genuine zero-record history. */
+  loading?: boolean;
   /** autoExport=true also regenerates + downloads the PDF once loaded. */
   onLoadRecord: (record: SalaryHistoryRecord, autoExport?: boolean) => void;
   onDelete: (record: SalaryHistoryRecord) => void;
 }
 
-export function SalaryHistoryPage({ records, onLoadRecord, onDelete }: Props) {
+export function SalaryHistoryPage({ records, loading = false, onLoadRecord, onDelete }: Props) {
   const { format: fmt } = useCurrency();
   const [search, setSearch] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -81,7 +84,12 @@ export function SalaryHistoryPage({ records, onLoadRecord, onDelete }: Props) {
         </button>
       </TableToolbar>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="page-loading">
+          <Loader2 size={16} />
+          Loading salary history…
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon"><History size={24} /></div>
           <h2>{records.length === 0 ? 'No salary slips yet' : 'No records match your filters'}</h2>

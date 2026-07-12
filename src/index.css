@@ -133,25 +133,17 @@ select {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slideIn {
-  from { opacity: 0; transform: translateX(-8px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes pulse-soft {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.6; }
-}
-
 .animate-fade-in-up  { animation: fadeInUp 0.35s ease-out both; }
-.animate-slide-in    { animation: slideIn 0.25s ease-out both; }
-.animate-pulse-soft  { animation: pulse-soft 2s ease-in-out infinite; }
 
 /* Staggered children */
 .stagger-children > *:nth-child(1) { animation-delay: 0ms;  }
 .stagger-children > *:nth-child(2) { animation-delay: 60ms; }
 .stagger-children > *:nth-child(3) { animation-delay: 120ms;}
 .stagger-children > *:nth-child(4) { animation-delay: 180ms;}
+.stagger-children > *:nth-child(5) { animation-delay: 240ms;}
+.stagger-children > *:nth-child(6) { animation-delay: 300ms;}
+.stagger-children > *:nth-child(7) { animation-delay: 360ms;}
+.stagger-children > *:nth-child(8) { animation-delay: 420ms;}
 
 /* ============================================================
    REUSABLE COMPONENT STYLES
@@ -189,7 +181,7 @@ select {
 }
 
 .card-body {
-  padding: 18px;
+  padding: 20px;
 }
 
 /* Form Fields */
@@ -249,16 +241,6 @@ select {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:disabled:active { transform: none; }
 
-.btn-primary {
-  background: var(--brand-primary);
-  color: #fff;
-  box-shadow: 0 1px 3px rgb(15 23 42 / .25);
-}
-.btn-primary:hover:not(:disabled) {
-  filter: brightness(1.18);
-  box-shadow: 0 4px 8px rgb(15 23 42 / .30);
-}
-
 .btn-secondary {
   background: var(--clr-surface);
   color: var(--clr-text);
@@ -282,25 +264,6 @@ select {
   box-shadow: 0 4px 8px rgb(15 23 42 / .35);
 }
 
-.btn-ghost {
-  background: transparent;
-  color: var(--clr-text-muted);
-  padding: 6px 10px;
-}
-.btn-ghost:hover { background: var(--arna-offwhite); color: var(--clr-text); }
-
-.btn-danger {
-  background: var(--clr-danger-soft);
-  color: var(--clr-danger);
-  border: 1.5px solid #FECACA;
-}
-.btn-danger:hover:not(:disabled) {
-  background: var(--clr-danger);
-  border-color: var(--clr-danger);
-  color: #fff;
-  box-shadow: 0 4px 8px rgb(220 38 38 / .25);
-}
-
 .btn-icon {
   padding: 7px;
   background: transparent;
@@ -308,43 +271,6 @@ select {
   border-radius: var(--radius-sm);
 }
 .btn-icon:hover { background: var(--arna-offwhite); color: var(--clr-text); }
-
-/* Tab Toggle */
-.tab-group {
-  display: flex;
-  background: #E2E8F0;
-  border-radius: var(--radius-sm);
-  padding: 3px;
-  gap: 2px;
-}
-
-.tab-btn {
-  padding: 6px 14px;
-  font-size: 11.5px;
-  font-weight: 700;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition);
-  color: var(--clr-text-muted);
-  background: transparent;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.tab-btn.active {
-  background: var(--brand-primary);
-  color: #fff;
-  box-shadow: var(--shadow-sm);
-}
-
-.tab-btn:not(.active):hover {
-  color: var(--brand-primary);
-  background: rgba(255,255,255,0.6);
-}
 
 /* Badge */
 .badge {
@@ -357,28 +283,6 @@ select {
   background: var(--arna-offwhite);
   color: var(--brand-primary);
   border: 1px solid var(--clr-border);
-}
-
-/* Section divider */
-.section-divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 4px 0;
-}
-.section-divider::before,
-.section-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--clr-border);
-}
-.section-divider span {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--clr-text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 /* Inline salary row */
@@ -424,7 +328,24 @@ select {
 
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Sprint 5.6 — form ~45% / preview ~55%, so the PDF preview reads at
+     something closer to its real proportions while the form still gets
+     comfortable room; was an even 1fr 1fr split.
+     Sprint 5.6.1 — minmax(0, Nfr), not bare Nfr: a bare `9fr` column is
+     shorthand for `minmax(auto, 9fr)`, so any child content wider than
+     that share (e.g. a long employee name/designation) forced the
+     track — and therefore the Live Preview column next to it — wider
+     than intended the moment an employee was selected. minmax(0, Nfr)
+     caps each track's minimum at 0, so content can never grow a track
+     past its fr share; both columns now stay fixed regardless of what
+     renders inside them.
+     Sprint 5.7 — form ~35% / preview ~65%, per the updated HRMS-style
+     layout spec; the minmax(0, …) fix above still applies unchanged.
+     Sprint 5.7.1 — back to form ~45% / preview ~55%: at 35/65 the form
+     fields felt cramped/busy for how little horizontal room they had;
+     this gives the form column meaningfully more breathing room while
+     the preview still reads comfortably larger than a plain 50/50. */
+  grid-template-columns: minmax(0, 9fr) minmax(0, 11fr);
   gap: 28px;
   padding: 32px 0 48px;
   align-items: start;
@@ -665,9 +586,9 @@ select {
 
 .app-sidebar {
   flex-shrink: 0;
-  width: 250px;
+  width: 216px;
   background: #0F766E;
-  padding: 22px 14px;
+  padding: 22px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -677,8 +598,8 @@ select {
 .sidebar-link {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 10px 13px;
+  gap: 10px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
@@ -687,10 +608,22 @@ select {
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  width: 100%;
+  min-width: 0;
   transition: background var(--transition), color var(--transition), transform var(--transition), box-shadow var(--transition);
 }
 
 .sidebar-link svg { flex-shrink: 0; }
+
+/* Narrower sidebar (Sprint 5.7.1) — some labels ("ARNA Team Directory")
+   are close to the available width, so truncate gracefully with an
+   ellipsis instead of wrapping/overflowing the fixed-width rail. */
+.sidebar-link-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 
 .sidebar-link:hover:not(.active) {
   background: rgba(255, 255, 255, 0.12);
@@ -1310,6 +1243,15 @@ select {
   height: 100%;
   border-radius: 4px;
   transition: width 0.4s ease;
+}
+
+/* App Footer — responsive column stacking, matching the breakpoints
+   already used elsewhere in this file (1100px / 640px). */
+@media (max-width: 1100px) {
+  .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 640px) {
+  .footer-grid { grid-template-columns: 1fr !important; }
 }
 
 /* Compact empty state for use inside a Card rather than a full page */

@@ -23,7 +23,7 @@ const TONE_COLOUR: Record<NonNullable<Props['tone']>, string> = {
 export function KpiCard({ icon: Icon, label, value, caption, tone = 'primary' }: Props) {
   const accent = TONE_COLOUR[tone];
   return (
-    <div className="kpi-card">
+    <div className="kpi-card animate-fade-in-up">
       <div className="kpi-card-icon" style={{ background: `color-mix(in srgb, ${accent} 14%, white)`, color: accent }}>
         <Icon size={17} />
       </div>

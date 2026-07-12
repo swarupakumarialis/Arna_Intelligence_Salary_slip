@@ -98,8 +98,8 @@ export type EmploymentType = 'Full-time' | 'Part-time' | 'Contract' | 'Intern';
 
 /* ── Employee Master ──────────────────────────────────────────
    Persistent employee directory, independent of any single payslip
-   and independent of any one company — this type and its storage
-   layer (utils/employeeStore.ts) are generic. `id` is the internal
+   and independent of any one company — this type and its backend
+   storage (src/api/employeeApi.ts) are generic. `id` is the internal
    storage key; `employeeId` is the user-facing business ID (aka
    "Employee Code") shown on the payslip and used for lookup/search. */
 export interface Employee {
@@ -158,6 +158,19 @@ export interface SalaryHistoryRecord {
   companyName: string;
   pdfVersion: string;
   status: 'Generated';
+  /** Sprint 5.4 — the only addition to this interface. Set once the
+      generated PDF has been archived on the backend (see
+      src/api/pdfApi.ts); undefined for records created before this
+      sprint, or if archiving failed (archiving is best-effort and
+      never blocks a payslip download). */
+  pdfArchiveId?: string;
+  /** Sprint 5.5 — email automation additions, same "optional, no
+      migration needed" convention as pdfArchiveId above. Set by the
+      backend (see src/api/emailApi.ts) after a send attempt; undefined
+      for records that have never been emailed. */
+  emailStatus?: 'Pending' | 'Sent' | 'Failed';
+  emailSentAt?: string;
+  emailRecipient?: string;
 }
 
 export type ActivityType =

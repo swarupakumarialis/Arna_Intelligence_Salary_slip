@@ -1,10 +1,9 @@
 import React from 'react';
-import { Send, Link2, Download, Sparkles } from 'lucide-react';
+import { Send, Link2, Sparkles } from 'lucide-react';
 
 interface Props {
   onGmail: () => void;
   onOutlook: () => void;
-  onDownloadPDF: () => void;
   disabled?: boolean;
 }
 
@@ -23,11 +22,12 @@ const itemStyle: React.CSSProperties = {
  * mailto, neither web compose API can accept a file attachment from a
  * page, so both trigger a PDF download first, same as the email modal.
  * "Copy Secure Link" is a deliberate placeholder: sharing a private
- * payslip via a link would need a backend to host it behind auth,
- * which this client-only app doesn't have — it's disabled rather than
- * faked.
+ * payslip via a link needs a backend to host it behind auth (Google
+ * Drive integration is planned for Sprint 5.6) — it's disabled rather
+ * than faked. No "Download PDF" item here (Sprint 5.5) — it duplicated
+ * the adjacent Export PDF button.
  */
-export function ShareSalaryMenu({ onGmail, onOutlook, onDownloadPDF, disabled }: Props) {
+export function ShareSalaryMenu({ onGmail, onOutlook, disabled }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <button
@@ -62,16 +62,6 @@ export function ShareSalaryMenu({ onGmail, onOutlook, onDownloadPDF, disabled }:
           <Sparkles size={10} /> Soon
         </span>
       </div>
-      <button
-        style={itemStyle}
-        disabled={disabled}
-        onClick={onDownloadPDF}
-        onMouseEnter={e => { e.currentTarget.style.background = 'var(--clr-hover)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-      >
-        <Download size={14} style={{ color: 'var(--clr-text-muted)' }} />
-        Download PDF
-      </button>
     </div>
   );
 }

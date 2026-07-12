@@ -10,7 +10,9 @@ import { QuickActionsPanel, QuickAction } from '../components/dashboard/QuickAct
 import { RecentActivityPanel } from '../components/dashboard/RecentActivityPanel';
 import { PayrollSummaryPanel } from '../components/dashboard/PayrollSummaryPanel';
 import { EmployeeDistributionPanel } from '../components/dashboard/EmployeeDistributionPanel';
-import { RecentEmployeesPanel } from '../components/dashboard/RecentEmployeesPanel';
+import { EmploymentTypePanel } from '../components/dashboard/EmploymentTypePanel';
+import { MonthlyPayrollPanel } from '../components/dashboard/MonthlyPayrollPanel';
+import { SalaryDistributionPanel } from '../components/dashboard/SalaryDistributionPanel';
 import {
   Users, UserCheck, Receipt, Wallet, Clock3, TrendingDown, Coins,
   Zap, FileSpreadsheet, Settings, History,
@@ -62,7 +64,7 @@ export function DashboardPage({
     <div className="animate-fade-in-up">
       <WelcomeBanner periodLabel={getCurrentPeriodLabel()} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 26 }}>
+      <div className="stagger-children" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 26 }}>
         <KpiCard tone="primary" icon={Users} label="Total Employees" value={String(employees.length)} />
         <KpiCard tone="success" icon={UserCheck} label="Active Employees" value={String(metrics.activeEmployees.length)} />
         <KpiCard tone="info" icon={Receipt} label="Slips Generated" value={String(salaryHistory.length)} caption={`${metrics.thisPeriodRecords.length} this period`} />
@@ -77,13 +79,26 @@ export function DashboardPage({
       </div>
 
       <div className="dashboard-grid" style={{ marginBottom: 16 }}>
-        <PayrollSummaryPanel records={salaryHistory} month={currentMonth} year={currentYear} fmt={fmt} />
-        <EmployeeDistributionPanel employees={employees} />
+        <div className="animate-fade-in-up" style={{ animationDelay: '40ms' }}>
+          <MonthlyPayrollPanel records={salaryHistory} fmt={fmt} />
+        </div>
+        <div className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+          <SalaryDistributionPanel records={salaryHistory} />
+        </div>
+      </div>
+
+      <div className="dashboard-grid" style={{ marginBottom: 16 }}>
+        <div className="animate-fade-in-up" style={{ animationDelay: '40ms' }}>
+          <EmployeeDistributionPanel employees={employees} />
+        </div>
+        <div className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+          <EmploymentTypePanel employees={employees} />
+        </div>
       </div>
 
       <div className="dashboard-grid">
+        <PayrollSummaryPanel records={salaryHistory} month={currentMonth} year={currentYear} fmt={fmt} />
         <RecentActivityPanel activityLog={activityLog} onDeleteActivity={onDeleteActivity} />
-        <RecentEmployeesPanel employees={employees} onOpenEmployeeMaster={onOpenEmployeeMaster} />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { BrandConfig } from '../utils/companySettingsStore';
 import { FormErrors, TouchedFields } from '../App';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
-import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins } from 'lucide-react';
+import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast } from 'lucide-react';
 import { CurrencyCode, CURRENCY_META } from '../contexts/CurrencyContext';
 
 interface Props {
@@ -204,6 +204,36 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                 <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--clr-text-muted)', fontWeight: 600 }}>{brand.secondaryColour}</span>
               </div>
             </div>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'brand' && (
+        <Card title="More Branding Options" icon={<Contrast size={13} />} className="animate-fade-in-up" bodyStyle={{ opacity: 0.85 }}>
+          <p style={{ fontSize: 11.5, color: 'var(--clr-text-subtle)', margin: '-4px 0 16px' }}>
+            Additional branding controls, on top of the working Logo and Colours above.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
+            {[
+              { label: 'Accent Colour', desc: 'A third colour for badges, chips, and secondary highlights.' },
+              { label: 'Theme', desc: 'Light / dark mode for the app itself (payslips stay print-ready white).' },
+            ].map(({ label, desc }) => (
+              <div key={label}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+                  <FieldLabel>{label}</FieldLabel>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                    fontSize: 9.5, fontWeight: 700, color: 'var(--arna-amber)',
+                    textTransform: 'uppercase', letterSpacing: '0.04em',
+                    background: '#FFFBEB', border: '1px solid #FDE68A',
+                    borderRadius: 999, padding: '1px 7px', marginBottom: 5,
+                  }}>
+                    <Sparkles size={9} /> Available in Upcoming Release
+                  </span>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: 0 }}>{desc}</p>
+              </div>
+            ))}
           </div>
         </Card>
       )}

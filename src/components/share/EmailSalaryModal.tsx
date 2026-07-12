@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mail, X, Loader2, Info } from 'lucide-react';
+import { Mail, X, Loader2, Paperclip } from 'lucide-react';
 import { buildEmailSubject, buildEmailBody } from './EmailTemplate';
 
 interface Props {
@@ -11,9 +11,8 @@ interface Props {
   employeeEmail: string;
   month: string;
   year: string | number;
-  companyName: string;
   sending: boolean;
-  onSend: (to: string, subject: string, message: string) => void;
+  onSend: (to: string, subject: string) => void;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -22,17 +21,19 @@ const labelStyle: React.CSSProperties = {
 };
 
 /**
- * "Email Employee" modal — collects/edits the recipient, subject, and
- * message, then hands them to onSend. It does not itself generate the
- * PDF or send anything; App.tsx owns that (see generateSalarySlipPdf +
- * handleEmailEmployee), keeping this component pure UI.
+ * "Email Employee" modal (Sprint 5.5) — collects/edits the recipient
+ * and subject, previews the fixed body copy and the PDF that will be
+ * attached, then hands {to, subject} to onSend. It does not generate
+ * or fetch the PDF itself: App.tsx's handleEmailEmployee locates the
+ * already-archived PDF for the current employee/month/year and calls
+ * the backend email-send endpoint, which reads that stored file —
+ * never regenerating it here or server-side.
  */
 export function EmailSalaryModal({
-  isOpen, onClose, employeeName, employeeEmail, month, year, companyName, sending, onSend,
+  isOpen, onClose, employeeName, employeeEmail, month, year, sending, onSend,
 }: Props) {
   const [to, setTo] = useState(employeeEmail);
   const [subject, setSubject] = useState(buildEmailSubject({ month, year }));
-  const [message, setMessage] = useState(buildEmailBody({ employeeName, month, year, companyName }));
 
   /* Re-seed the fields from the current payslip context every time the
      modal opens, so switching employees/periods before opening it again
@@ -41,13 +42,13 @@ export function EmailSalaryModal({
     if (!isOpen) return;
     setTo(employeeEmail);
     setSubject(buildEmailSubject({ month, year }));
-    setMessage(buildEmailBody({ employeeName, month, year, companyName }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const canSend = to.trim().length > 0 && !sending;
+  const body = buildEmailBody({ employeeName, month, year });
 
   return createPortal(
     <div
@@ -98,33 +99,32 @@ export function EmailSalaryModal({
           </div>
 
           <div>
-            <label style={labelStyle}>Message</label>
+            <label style={labelStyle}>Message (preview)</label>
             <textarea
               className="field"
-              value={message}
-              onChange={e => setMessage(e.target.value)}
+              value={body}
+              readOnly
               rows={8}
-              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
-              disabled={sending}
+              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6, background: 'var(--clr-bg)', color: 'var(--clr-text-muted)', cursor: 'default' }}
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 7, padding: '9px 11px', background: 'var(--clr-bg)', borderRadius: 8, fontSize: 11, color: 'var(--clr-text-subtle)', lineHeight: 1.6 }}>
-            <Info size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>The salary slip PDF will download automatically and your email app will open pre-filled — browsers don't allow web pages to attach files to an email for you, so please attach the downloaded PDF before sending.</span>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '9px 11px', background: 'var(--clr-bg)', borderRadius: 8, fontSize: 11.5, color: 'var(--clr-text-subtle)' }}>
+            <Paperclip size={13} style={{ flexShrink: 0 }} />
+            <span>The stored salary slip PDF for {month} {year} will be attached automatically from the PDF Archive.</span>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 10, padding: '14px 20px', borderTop: '1px solid var(--clr-border)', justifyContent: 'flex-end', flexShrink: 0 }}>
           <button onClick={onClose} disabled={sending} className="btn btn-secondary" style={{ fontSize: 12.5 }}>Cancel</button>
           <button
-            onClick={() => onSend(to.trim(), subject, message)}
+            onClick={() => onSend(to.trim(), subject)}
             disabled={!canSend}
             className="btn btn-dark"
             style={{ fontSize: 12.5, opacity: canSend ? 1 : 0.6 }}
           >
             {sending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-            {sending ? 'Preparing…' : 'Send Email'}
+            {sending ? 'Sending…' : 'Send Email'}
           </button>
         </div>
       </div>

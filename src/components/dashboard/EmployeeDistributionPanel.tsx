@@ -2,38 +2,26 @@ import React, { useMemo } from 'react';
 import { Employee } from '../../types';
 import { Card } from '../ui/Card';
 import { EmptyState } from '../ui/EmptyState';
+import { DonutChart } from './charts/DonutChart';
 import { Users } from 'lucide-react';
 
 interface Props {
   employees: Employee[];
 }
 
-const TYPE_COLOUR: Record<string, string> = {
-  'Full-time': 'var(--arna-navy)',
-  'Part-time': 'var(--arna-accent)',
-  'Contract': 'var(--arna-teal)',
-  'Intern': 'var(--arna-amber)',
-  'Unspecified': 'var(--clr-text-subtle)',
-};
-
-/** Workforce breakdown by employment type, built entirely from the
-    live Employee Directory (App.tsx's `employees` state) — no
-    invented categories or counts. "Unspecified" absorbs any record
-    with no employmentType set rather than being silently dropped, so
-    the total always reconciles with the directory's real headcount. */
+/** Active vs. inactive headcount, built entirely from the live
+    Employee Directory (App.tsx's `employees` state) — no invented
+    categories or counts. Employment-type breakdown moved to its own
+    EmploymentTypePanel (Sprint 5.6) so each donut answers one question. */
 export function EmployeeDistributionPanel({ employees }: Props) {
   const total = employees.length;
-  const activeCount = useMemo(() => employees.filter(e => e.status === 'Active').length, [employees]);
 
-  const byType = useMemo(() => {
-    const counts = new Map<string, number>();
-    employees.forEach(e => {
-      const key = e.employmentType || 'Unspecified';
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
-    return Array.from(counts.entries())
-      .map(([type, count]) => ({ type, count, pct: total ? Math.round((count / total) * 100) : 0 }))
-      .sort((a, b) => b.count - a.count);
+  const segments = useMemo(() => {
+    const active = employees.filter(e => e.status === 'Active').length;
+    return [
+      { label: 'Active', value: active, color: 'var(--arna-teal)' },
+      { label: 'Inactive', value: total - active, color: 'var(--clr-text-subtle)' },
+    ].filter(s => s.value > 0);
   }, [employees, total]);
 
   if (total === 0) {
@@ -51,33 +39,10 @@ export function EmployeeDistributionPanel({ employees }: Props) {
 
   return (
     <Card title="Employee Distribution" icon={<Users size={13} />}>
-      <div style={{ display: 'flex', gap: 24, marginBottom: 18 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--clr-text)', fontVariantNumeric: 'tabular-nums' }}>{total}</div>
-          <div style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>Total</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--arna-teal)', fontVariantNumeric: 'tabular-nums' }}>{activeCount}</div>
-          <div style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>Active</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--clr-text-subtle)', fontVariantNumeric: 'tabular-nums' }}>{total - activeCount}</div>
-          <div style={{ fontSize: 11, color: 'var(--clr-text-muted)' }}>Inactive</div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-        {byType.map(({ type, count, pct }) => (
-          <div key={type}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-              <span style={{ fontWeight: 600, color: 'var(--clr-text)' }}>{type}</span>
-              <span style={{ color: 'var(--clr-text-muted)' }}>{count} · {pct}%</span>
-            </div>
-            <div className="dist-bar-track">
-              <div className="dist-bar-fill" style={{ width: `${pct}%`, background: TYPE_COLOUR[type] || 'var(--brand-primary)' }} />
-            </div>
-          </div>
-        ))}
-      </div>
+      <p style={{ fontSize: 11, color: 'var(--clr-text-muted)', margin: '-4px 0 16px' }}>
+        {total} employee{total === 1 ? '' : 's'} in the directory
+      </p>
+      <DonutChart data={segments} centerLabel="Total" />
     </Card>
   );
 }

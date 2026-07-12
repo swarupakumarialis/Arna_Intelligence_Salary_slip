@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, Mail, Share2, ChevronRight, ChevronLeft } from 'lucide-react';
+import { ChevronDown, Mail, Share2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { ShareSalaryMenu } from './ShareSalaryMenu';
 
 interface Props {
-  onDownloadPDF: () => void;
   onEmailEmployee: () => void;
   onGmail: () => void;
   onOutlook: () => void;
@@ -19,15 +18,16 @@ const itemStyle: React.CSSProperties = {
 };
 
 /**
- * Dropdown next to the existing Export PDF button — the single entry
- * point for every way a generated salary slip can leave the app:
- * Download PDF (same action as the Export PDF button), Email Employee
- * (opens EmailSalaryModal), and Share (expands in place to
- * ShareSalaryMenu's Gmail/Outlook/Copy Link/Download options). Purely
- * presentational — every click just calls back into App.tsx, which
- * owns PDF generation, validation, and activity logging.
+ * Dropdown next to the existing Export PDF button — every way a
+ * generated salary slip can leave the app besides that direct
+ * download: Email Employee (opens EmailSalaryModal) and Share (expands
+ * in place to ShareSalaryMenu's Gmail/Outlook/Copy Link options). No
+ * "Download PDF" item here (Sprint 5.5) — it duplicated the adjacent
+ * Export PDF button. Purely presentational — every click just calls
+ * back into App.tsx, which owns PDF generation, validation, and
+ * activity logging.
  */
-export function ExportShareDropdown({ onDownloadPDF, onEmailEmployee, onGmail, onOutlook, disabled }: Props) {
+export function ExportShareDropdown({ onEmailEmployee, onGmail, onOutlook, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -73,17 +73,6 @@ export function ExportShareDropdown({ onDownloadPDF, onEmailEmployee, onGmail, o
             <>
               <button
                 style={itemStyle}
-                onClick={() => { close(); onDownloadPDF(); }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--clr-hover)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <Download size={14} style={{ color: 'var(--clr-text-muted)' }} />
-                  Download PDF
-                </span>
-              </button>
-              <button
-                style={itemStyle}
                 onClick={() => { close(); onEmailEmployee(); }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--clr-hover)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
@@ -123,7 +112,6 @@ export function ExportShareDropdown({ onDownloadPDF, onEmailEmployee, onGmail, o
               <ShareSalaryMenu
                 onGmail={() => { close(); onGmail(); }}
                 onOutlook={() => { close(); onOutlook(); }}
-                onDownloadPDF={() => { close(); onDownloadPDF(); }}
               />
             </>
           )}

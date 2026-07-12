@@ -5,6 +5,9 @@ import morgan from 'morgan';
 import { isDatabaseConnected } from './config/database.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import employeeRoutes from './routes/employee.routes.js';
+import salaryHistoryRoutes from './routes/salaryHistory.routes.js';
+import pdfStorageRoutes from './routes/pdfStorage.routes.js';
+import emailRoutes from './routes/email.routes.js';
 
 /**
  * Express app configuration — separated from server.js (which owns
@@ -45,8 +48,11 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/employees', employeeRoutes);
+app.use('/api/salary-history', salaryHistoryRoutes);
+app.use('/api/pdf', pdfStorageRoutes);
+app.use('/api/email', emailRoutes);
 
-// Future feature routers (salary, auth, …) mount here, above notFound/errorHandler.
+// Future feature routers (auth, …) mount here, above notFound/errorHandler.
 
 app.use(notFound);
 app.use(errorHandler);

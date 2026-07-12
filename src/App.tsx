@@ -3,9 +3,9 @@ import { SalaryData, Employee } from './types';
 import { SalarySlipForm } from './components/SalarySlipForm';
 import { SalarySlipPreview } from './components/SalarySlipPreview';
 import { SalarySlipPDF } from './components/pdf/SalarySlipPDF';
-import { EmployeeMaster } from './components/EmployeeMaster';
 import { TopNav } from './components/layout/TopNav';
 import { Sidebar, SidebarKey } from './components/layout/Sidebar';
+import { Footer } from './components/layout/Footer';
 import { Download, Loader2, AlertTriangle, X, CheckCircle2, FileText } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -15,7 +15,9 @@ import { calculateLop, LOP_DEDUCTION_ID } from './utils/payroll';
 import type { BrandConfig } from './utils/companySettingsStore';
 import { DEFAULT_BRAND, loadCompanySettings, saveCompanySettings } from './utils/companySettingsStore';
 import { SalaryHistoryRecord } from './types';
-import { addSalaryHistoryRecord, deleteSalaryHistoryRecord, loadSalaryHistory } from './utils/salaryHistoryStore';
+import { getSalaryHistory, createSalaryHistory, deleteSalaryHistory } from './api/salaryHistoryApi';
+import { uploadPdf, deletePdfArchive } from './api/pdfApi';
+import { sendSalaryEmail, ApiError as EmailApiError } from './api/emailApi';
 import { logActivity, deleteActivityEntry, loadActivityLog } from './utils/activityLogStore';
 import { useAuth } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
@@ -35,6 +37,9 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ de
 const SalaryHistoryPage = lazy(() => import('./pages/SalaryHistoryPage').then(m => ({ default: m.SalaryHistoryPage })));
 const PayrollExportPage = lazy(() => import('./pages/PayrollExportPage').then(m => ({ default: m.PayrollExportPage })));
 const CompanySettingsPage = lazy(() => import('./pages/CompanySettingsPage').then(m => ({ default: m.CompanySettingsPage })));
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
+const DocumentsPage = lazy(() => import('./pages/DocumentsPage').then(m => ({ default: m.DocumentsPage })));
+const TaxCenterPage = lazy(() => import('./pages/TaxCenterPage').then(m => ({ default: m.TaxCenterPage })));
 
 function PageLoadingFallback() {
   return (
@@ -60,11 +65,7 @@ export type { BrandConfig };
    To stand this up for a different company: update TEAM_DIRECTORY_TITLE
    / APP_NAME. APP_NAME is the software's own product name (shown in
    the top nav); it's intentionally separate from BrandConfig.companyName,
-   which is the tenant's legal entity name shown on the payslip.
-   src/utils/employeeStore.ts, src/data/arnaTeamSeed.ts, and
-   src/data/arnaEmployeeEnrichment.ts are no longer used (Sprint 5.2
-   migrated the directory to the backend) but are kept, unmodified,
-   until the migration is fully verified. */
+   which is the tenant's legal entity name shown on the payslip. */
 const TEAM_DIRECTORY_TITLE = 'ARNA Team Directory';
 const APP_NAME = 'ARNA Salary Suite';
 
@@ -159,24 +160,40 @@ export default function App() {
   /* Live Preview zoom — 'fixed' means previewScale is whatever the
      toolbar last set directly (a preset % or +/- step); 'fit-width'/
      'fit-page' mean it's recomputed on every resize to fit the shell
-     (see the effect below). Defaults to fixed 100%, per spec. */
+     (see the effect below). Defaults to fixed 75% (Sprint 5.7.2) — the
+     A4 page reads more comfortably at a glance; users can still zoom
+     to 100%+ via the toolbar. */
   const [zoomMode, setZoomMode] = useState<'fixed' | 'fit-width' | 'fit-page'>('fixed');
-  const [previewScale, setPreviewScale] = useState(1);
+  const [previewScale, setPreviewScale] = useState(0.75);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<FormErrors>({});
   const [showValidationDialog, setShowValidationDialog] = useState(false);
   const [touchedFields, setTouchedFields] = useState<TouchedFields>({});
   /* Employee Directory — Sprint 5.2 moved this from localStorage
-     (utils/employeeStore.ts) to MongoDB via the backend API (see
-     src/api/employeeApi.ts). Starts empty and is populated by the
-     effect below; EmployeeMaster.tsx re-fetches/re-syncs this same
-     state whenever the directory modal is opened, so this initial
-     load is really just "have something to show the Salary Generator
-     dropdown and Dashboard panels before the user opens the directory." */
+     to MongoDB via the backend API (see src/api/employeeApi.ts).
+     Starts empty and is populated by the
+     effect below; EmployeesPage.tsx (Sprint 5.7 — the dedicated
+     directory page, replacing the old EmployeeMaster modal) updates
+     this same shared state via onEmployeesChange, so this initial load
+     is really just "have something to show the Salary Generator
+     dropdown and Dashboard panels before the Employees page is opened." */
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [showEmployeeMaster, setShowEmployeeMaster] = useState(false);
+  /* True only until the mount-fetch below settles (success or failure) —
+     lets EmployeesPage distinguish "still loading" from the genuine
+     "zero employees" empty state, instead of briefly showing "No
+     employees yet" while the very first fetch is still in flight. */
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const [showEmailModal, setShowEmailModal] = useState(false);
-  const [salaryHistory, setSalaryHistory] = useState<SalaryHistoryRecord[]>(loadSalaryHistory);
+  /* Salary History — Sprint 5.3 moved this from localStorage
+     to MongoDB via the backend API (see src/api/salaryHistoryApi.ts),
+     following the exact same pattern as
+     the Employee Directory migration. Starts empty, populated by the
+     fetch effect below; SalaryHistoryPage, DashboardPage, and
+     PayrollExportPage all read this same shared state as a prop. */
+  const [salaryHistory, setSalaryHistory] = useState<SalaryHistoryRecord[]>([]);
+  /* Same "loading vs genuinely empty" distinction as employeesLoading
+     above, consumed by SalaryHistoryPage. */
+  const [salaryHistoryLoading, setSalaryHistoryLoading] = useState(true);
   const [activityLog, setActivityLog] = useState(loadActivityLog);
   /* Set by "Download PDF" from Salary History — tells the effect below
      to trigger a real export once the loaded record's data has
@@ -194,6 +211,22 @@ export default function App() {
      SalarySlipPreview. Export captures this node now, not the preview. */
   const pdfRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  /* The one and only record of "does the payslip on screen right now
+     have an archived PDF, and if so which one" — set synchronously
+     (never via useState) by the two places that ever put a payslip on
+     screen with a known archive: generateSalarySlipPdf, right after a
+     fresh export finishes archiving+linking, and
+     loadHistoryRecordIntoGenerator, right after pulling an existing
+     record back in from Salary History. Both write it directly from
+     data they already have in hand — "Email Employee" (findArchivedMatch,
+     below) never searches `salaryHistory` for a match; it just reads
+     this ref, which is always current the instant either of those two
+     functions finishes, with no dependency on a re-render landing
+     first the way a value read from React state via a callback closure
+     would be. */
+  const lastArchivedRef = useRef<{
+    employeeId: string; month: string; year: string; salaryHistoryId: string; pdfArchiveId: string;
+  } | null>(null);
 
   /* Loads the Employee Directory from the backend once on mount. This
      is the app-wide `employees` list consumed by the Salary Generator's
@@ -211,6 +244,30 @@ export default function App() {
         if (cancelled) return;
         setPdfError(err instanceof ApiError ? err.message : 'Unable to connect to server');
         setTimeout(() => setPdfError(null), 5000);
+      })
+      .finally(() => {
+        if (!cancelled) setEmployeesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  /* Loads Salary History from the backend once on mount — same pattern
+     as the Employee Directory fetch above. SalaryHistoryPage,
+     DashboardPage, and PayrollExportPage all read this same shared
+     `salaryHistory` state as a prop; none of them fetch independently. */
+  useEffect(() => {
+    let cancelled = false;
+    getSalaryHistory({ limit: 1000 })
+      .then(result => {
+        if (!cancelled) setSalaryHistory(result.items);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setPdfError(err instanceof Error ? err.message : 'Unable to connect to server');
+        setTimeout(() => setPdfError(null), 5000);
+      })
+      .finally(() => {
+        if (!cancelled) setSalaryHistoryLoading(false);
       });
     return () => { cancelled = true; };
   }, []);
@@ -341,15 +398,10 @@ export default function App() {
     }));
   }, [employees]);
 
-  /* ARNA Team Directory is still the existing modal, not a page —
-     clicking it opens the modal without disturbing whatever page was
-     showing underneath. Every other sidebar item just switches which
-     page is visible in the content area. */
+  /* Sprint 5.7 — the Employee Directory ('directory') is now a real
+     page like every other sidebar destination (it used to special-case
+     into opening the EmployeeMaster modal instead). */
   const handleNavigate = useCallback((key: SidebarKey) => {
-    if (key === 'directory') {
-      setShowEmployeeMaster(true);
-      return;
-    }
     setActivePage(key);
   }, []);
 
@@ -483,7 +535,59 @@ export default function App() {
       pdfVersion: 'v1',
       status: 'Generated',
     };
-    setSalaryHistory(addSalaryHistoryRecord(record));
+    /* Persist to MongoDB. Deliberately its own try/catch: a backend
+       hiccup recording history must not stop a PDF that already
+       rendered successfully from downloading — matches the old
+       localStorage behaviour, where saveSalaryHistory() could never
+       fail loudly enough to block the download either. */
+    let savedRecord: SalaryHistoryRecord | null = null;
+    try {
+      savedRecord = await createSalaryHistory(record);
+      setSalaryHistory(prev => [savedRecord as SalaryHistoryRecord, ...prev]);
+    } catch (err) {
+      console.error('Failed to save salary history record:', err);
+    }
+
+    /* Archive the PDF on the backend (Sprint 5.4), linked to the
+       history record just saved above (Sprint 5.5 Bug Fix 1). Only
+       runs once createSalaryHistory has actually resolved with a real
+       Mongo _id — inside this `if`, savedRecord.id is guaranteed
+       non-null, so PdfArchive.salaryHistoryId can never be silently
+       created as null the way it could when this used the old
+       `savedRecord?.id` optional chain. If history saving failed
+       above, archiving is skipped entirely rather than creating an
+       orphaned PdfArchive nothing points back to — the download
+       itself (already completed above) is unaffected either way. */
+    if (savedRecord) {
+      const linkedId = savedRecord.id;
+      try {
+        const archived = await uploadPdf({
+          file: pdf.output('blob'),
+          fileName,
+          employeeId: data.employee.id,
+          employeeName: data.employee.name,
+          month: data.salary.month,
+          year: String(data.salary.year),
+          salaryHistoryId: linkedId,
+          generatedBy: 'HR Admin',
+        });
+        setSalaryHistory(prev => prev.map(r => (r.id === linkedId ? { ...r, pdfArchiveId: archived._id } : r)));
+        /* Written synchronously, not via setSalaryHistory above — see
+           lastArchivedRef's declaration for why "Email Employee"
+           checks this ref first rather than only the (React-render-
+           dependent) salaryHistory state. */
+        lastArchivedRef.current = {
+          employeeId: data.employee.id,
+          month: data.salary.month,
+          year: String(data.salary.year),
+          salaryHistoryId: linkedId,
+          pdfArchiveId: archived._id,
+        };
+      } catch (err) {
+        console.error('Failed to archive PDF:', err);
+      }
+    }
+
     setActivityLog(logActivity('salary_generated', data.employee.name, `${data.salary.month} ${data.salary.year}`));
 
     return { pdf, fileName };
@@ -503,31 +607,90 @@ export default function App() {
     }
   }, [generateSalarySlipPdf]);
 
-  /* Email Employee — generates + downloads the PDF exactly like Export
-     PDF, then opens the user's default mail client via mailto: with
-     the (possibly user-edited) recipient/subject/message. Browsers
-     don't allow a web page to attach a file to an outgoing email, so
-     "attach automatically" means "download it for you and tell you to
-     attach it" — EmailSalaryModal's inline note says this explicitly. */
-  const handleEmailEmployee = useCallback(async (to: string, subject: string, message: string) => {
+  /* Sprint 5.5 Workflow Audit — "is there an archived PDF for the
+     payslip on screen right now?", shared by handleOpenEmailModal and
+     handleEmailEmployee so both agree on the same answer. Reads
+     lastArchivedRef ONLY — no re-search of `salaryHistory` state.
+     There are exactly two places that ever populate this ref, both of
+     which write it directly from the record they just created/loaded
+     (never by searching an array for one that "looks like" the current
+     form): generateSalarySlipPdf, right after archiving+linking a
+     fresh export, and loadHistoryRecordIntoGenerator, right after
+     pulling an existing record back into the generator. The
+     employeeId/month/year check below isn't a search — it's a single
+     staleness guard against the one already-known ref, so switching to
+     a different employee/period without re-exporting or re-loading
+     correctly reads as "nothing archived yet" instead of reusing
+     whatever was archived for the previous payslip. */
+  const findArchivedMatch = useCallback((): { id: string; pdfArchiveId: string } | null => {
+    const ref = lastArchivedRef.current;
+    if (
+      ref &&
+      ref.employeeId === data.employee.id &&
+      ref.month === data.salary.month &&
+      ref.year === String(data.salary.year)
+    ) {
+      return { id: ref.salaryHistoryId, pdfArchiveId: ref.pdfArchiveId };
+    }
+    return null;
+  }, [data.employee.id, data.salary.month, data.salary.year]);
+
+  /* Email Employee (Sprint 5.5) — sends the salary slip via real SMTP
+     from the backend, attaching the PDF that Export PDF already
+     archived. Deliberately does NOT call generateSalarySlipPdf(): the
+     PDF sent by email must always be the already-stored PDF from the
+     PDF Archive, never a fresh render. If no matching archived record
+     exists yet, the caller (see onEmailEmployee below) never opens
+     this modal in the first place. */
+  const handleEmailEmployee = useCallback(async (to: string, subject: string) => {
+    const match = findArchivedMatch();
+    if (!match) {
+      setPdfError('Please export this salary slip as PDF first, then email it.');
+      setTimeout(() => setPdfError(null), 5000);
+      return;
+    }
     try {
       setIsGenerating(true);
-      const result = await generateSalarySlipPdf();
-      if (!result) return;
-      result.pdf.save(result.fileName);
+      await sendSalaryEmail({
+        employeeId: data.employee.id,
+        employeeName: data.employee.name,
+        recipientEmail: to,
+        month: data.salary.month,
+        year: String(data.salary.year),
+        salaryHistoryId: match.id,
+        pdfArchiveId: match.pdfArchiveId,
+        subject,
+      });
+      const sentAt = new Date().toISOString();
+      setSalaryHistory(prev => prev.map(r => (
+        r.id === match.id ? { ...r, emailStatus: 'Sent', emailSentAt: sentAt, emailRecipient: to } : r
+      )));
       setActivityLog(logActivity('salary_shared', data.employee.name, `Emailed to ${to}`));
       setShowEmailModal(false);
-      setNotice(`Salary slip downloaded. Attach it to the email now opening for ${to}.`);
+      setNotice(`Salary slip emailed to ${to}.`);
       setTimeout(() => setNotice(null), 6000);
-      window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
     } catch (error) {
-      console.error('Error preparing email:', error);
-      setPdfError('Failed to generate PDF for email. Please try again.');
-      setTimeout(() => setPdfError(null), 4000);
+      console.error('Error sending email:', error);
+      const message = error instanceof EmailApiError ? error.message : 'Failed to send email. Please try again.';
+      setPdfError(message);
+      setTimeout(() => setPdfError(null), 5000);
     } finally {
       setIsGenerating(false);
     }
-  }, [generateSalarySlipPdf, data.employee.name]);
+  }, [findArchivedMatch, data.employee.id, data.employee.name]);
+
+  /* Guards the "Email Employee" entry point: only opens the modal if a
+     PDF has already been archived for the current employee/month/year
+     (i.e. Export PDF was already clicked for this exact payslip), so
+     the modal never promises to send something that doesn't exist yet. */
+  const handleOpenEmailModal = useCallback(() => {
+    if (!findArchivedMatch()) {
+      setPdfError('Please export this salary slip as PDF first, then email it.');
+      setTimeout(() => setPdfError(null), 5000);
+      return;
+    }
+    setShowEmailModal(true);
+  }, [findArchivedMatch]);
 
   /* Share → Gmail / Outlook — same idea as Email Employee, but opens
      the provider's own web compose window (pre-filled) instead of the
@@ -542,7 +705,6 @@ export default function App() {
       const subject = buildEmailSubject({ month: data.salary.month, year: data.salary.year });
       const body = buildEmailBody({
         employeeName: data.employee.name, month: data.salary.month, year: data.salary.year,
-        companyName: brand.companyName,
       });
       const channelLabel = channel === 'gmail' ? 'Gmail' : 'Outlook';
       const url = channel === 'gmail'
@@ -559,7 +721,7 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [generateSalarySlipPdf, data, brand, employees]);
+  }, [generateSalarySlipPdf, data, employees]);
 
   /* Fires a real export once a record loaded via "Download PDF" (below)
      has actually committed to a render — effects only run after React
@@ -607,6 +769,22 @@ export default function App() {
       earnings: record.earnings.map(e => ({ ...e })),
       deductions: record.deductions.map(d => ({ ...d })),
     }));
+    /* Use the already-selected record directly — same lastArchivedRef
+       that generateSalarySlipPdf writes to, populated here straight
+       from the record's own pdfArchiveId (no re-searching salaryHistory
+       for something that "looks like" it). If this record was never
+       archived, this correctly clears the ref so "Email Employee"
+       reads as "not exported yet" for it, rather than silently reusing
+       whatever the previous payslip on screen had archived. */
+    lastArchivedRef.current = record.pdfArchiveId
+      ? {
+          employeeId: record.employeeId,
+          month: record.month,
+          year: record.year,
+          salaryHistoryId: record.id,
+          pdfArchiveId: record.pdfArchiveId,
+        }
+      : null;
     setActivePage('generator');
     if (autoExport) {
       setPendingAutoExport(true);
@@ -617,9 +795,27 @@ export default function App() {
     setTimeout(() => setNotice(null), 5000);
   }, []);
 
-  const handleDeleteHistoryRecord = useCallback((record: SalaryHistoryRecord) => {
-    setSalaryHistory(deleteSalaryHistoryRecord(record.id));
-    setActivityLog(logActivity('salary_deleted', record.employeeName, `${record.month} ${record.year}`));
+  const handleDeleteHistoryRecord = useCallback(async (record: SalaryHistoryRecord) => {
+    /* Clean up the archived PDF first, so a removed salary history
+       record never leaves an orphaned file behind (Sprint 5.4). This
+       is best-effort — if it fails (backend hiccup, file already
+       gone), the history record is still deleted below rather than
+       trapping the user with a record they can no longer remove. */
+    if (record.pdfArchiveId) {
+      try {
+        await deletePdfArchive(record.pdfArchiveId);
+      } catch (err) {
+        console.error('Failed to delete archived PDF:', err);
+      }
+    }
+    try {
+      await deleteSalaryHistory(record.id);
+      setSalaryHistory(prev => prev.filter(r => r.id !== record.id));
+      setActivityLog(logActivity('salary_deleted', record.employeeName, `${record.month} ${record.year}`));
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'Unable to connect to server');
+      setTimeout(() => setPdfError(null), 5000);
+    }
   }, []);
 
   const handleDeleteActivity = useCallback((id: string) => {
@@ -772,17 +968,6 @@ export default function App() {
         </div>
       )}
 
-      <EmployeeMaster
-        isOpen={showEmployeeMaster}
-        onClose={() => setShowEmployeeMaster(false)}
-        employees={employees}
-        onEmployeesChange={setEmployees}
-        title={TEAM_DIRECTORY_TITLE}
-        onEmployeeAdded={handleEmployeeAdded}
-        onEmployeeUpdated={handleEmployeeUpdated}
-        onEmployeeDeleted={handleEmployeeDeleted}
-      />
-
       <EmailSalaryModal
         isOpen={showEmailModal}
         onClose={() => setShowEmailModal(false)}
@@ -790,7 +975,6 @@ export default function App() {
         employeeEmail={employees.find(e => e.employeeId === data.employee.id)?.email || data.employee.email || ''}
         month={data.salary.month}
         year={data.salary.year}
-        companyName={brand.companyName}
         sending={isGenerating}
         onSend={handleEmailEmployee}
       />
@@ -814,7 +998,7 @@ export default function App() {
 
       <div className="app-body">
         <Sidebar
-          activeKey={showEmployeeMaster ? 'directory' : activePage}
+          activeKey={activePage}
           onNavigate={handleNavigate}
           teamDirectoryLabel={TEAM_DIRECTORY_TITLE}
         />
@@ -844,17 +1028,17 @@ export default function App() {
                     onBlurDeduction={handleBlurDeduction}
                     employees={employees}
                     onSelectEmployee={handleSelectEmployee}
-                    onOpenEmployeeMaster={() => setShowEmployeeMaster(true)}
+                    onOpenEmployeeMaster={() => setActivePage('directory')}
                     employeeDirectoryTitle={TEAM_DIRECTORY_TITLE}
                   />
                 </div>
 
                 {/* ── RIGHT: Live Preview ─────────────────────── */}
-                <aside className="preview-panel animate-fade-in-up" style={{ animationDelay: '80ms' }}>
-                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <aside className="preview-panel animate-fade-in-up" style={{ animationDelay: '80ms', minWidth: 0 }}>
+                  <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--clr-text)', margin: 0 }}>Live Preview</p>
-                      <p style={{ fontSize: 11, color: 'var(--clr-text-muted)', margin: '2px 0 0' }}>A4 · Updates instantly</p>
+                      <p style={{ fontSize: 17, fontWeight: 800, color: 'var(--clr-text)', margin: 0, letterSpacing: '-0.02em' }}>Live Preview</p>
+                      <p style={{ fontSize: 12, color: 'var(--clr-text-muted)', margin: '2px 0 0' }}>A4 · Updates instantly</p>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
@@ -868,8 +1052,7 @@ export default function App() {
                       </button>
                       <ExportShareDropdown
                         disabled={isGenerating}
-                        onDownloadPDF={handleDownloadPDF}
-                        onEmailEmployee={() => setShowEmailModal(true)}
+                        onEmailEmployee={handleOpenEmailModal}
                         onGmail={() => handleShareVia('gmail')}
                         onOutlook={() => handleShareVia('outlook')}
                       />
@@ -937,9 +1120,41 @@ export default function App() {
                   currentMonth={data.salary.month}
                   currentYear={String(data.salary.year)}
                   onNavigate={handleNavigate}
-                  onOpenEmployeeMaster={() => setShowEmployeeMaster(true)}
+                  onOpenEmployeeMaster={() => setActivePage('directory')}
                   onDeleteActivity={handleDeleteActivity}
                 />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'directory' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <EmployeesPage
+                  employees={employees}
+                  loading={employeesLoading}
+                  onEmployeesChange={setEmployees}
+                  title={TEAM_DIRECTORY_TITLE}
+                  onEmployeeAdded={handleEmployeeAdded}
+                  onEmployeeUpdated={handleEmployeeUpdated}
+                  onEmployeeDeleted={handleEmployeeDeleted}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'documents' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <DocumentsPage />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'taxcenter' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <TaxCenterPage />
               </Suspense>
             </div>
           )}
@@ -949,6 +1164,7 @@ export default function App() {
               <Suspense fallback={<PageLoadingFallback />}>
                 <SalaryHistoryPage
                   records={salaryHistory}
+                  loading={salaryHistoryLoading}
                   onLoadRecord={loadHistoryRecordIntoGenerator}
                   onDelete={handleDeleteHistoryRecord}
                 />
@@ -985,6 +1201,7 @@ export default function App() {
             </div>
           )}
 
+          <Footer />
         </main>
       </div>
     </div>
