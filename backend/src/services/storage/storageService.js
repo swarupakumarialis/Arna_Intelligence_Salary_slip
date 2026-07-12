@@ -31,6 +31,10 @@ export async function testConnection() {
   return activeProvider.testConnection();
 }
 
+export async function getStorageStats() {
+  return activeProvider.getStorageStats();
+}
+
 export async function upload({ buffer, fileName, year, month }) {
   return activeProvider.uploadFile({ buffer, fileName, year, month });
 }

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { SalaryData, SalaryItem, Employee } from '../types';
 import { Plus, Trash2, CircleDollarSign, Users, Lock, CalendarDays, UserCog, PhoneCall } from 'lucide-react';
 import { FormErrors, TouchedFields, LOP_DEDUCTION_ID } from '../App';
@@ -112,6 +112,132 @@ function InlineInput({
           boxShadow: error ? '0 0 0 3px rgba(220,38,38,0.10)' : undefined,
         }}
       />
+      <FieldError message={error} />
+    </div>
+  );
+}
+
+/* Default department options (Sprint 6.2B) — a fixed starting list,
+   not a managed/admin-editable list: "Other" always stays available
+   below so this never blocks a department that isn't on it. */
+const DEFAULT_DEPARTMENTS = [
+  'Human Resources (HR)', 'Finance', 'Accounts', 'Sales', 'Marketing', 'Operations',
+  'Administration', 'Engineering', 'IT', 'Development', 'QA', 'Support',
+  'Customer Success', 'Legal', 'Procurement', 'Logistics', 'Production',
+  'Research & Development', 'Training', 'Business Development', 'Management',
+];
+
+/** Searchable Department dropdown (Sprint 6.2B) — replaces a plain
+    free-text field with a filterable list of common departments,
+    while still allowing any custom value via "Other" so this never
+    blocks a department that isn't one of the defaults. Kept local to
+    this file, matching how InlineInput/SalaryRow/etc. are already
+    file-scoped sub-components rather than shared ui/ primitives. */
+function DepartmentField({
+  value, onChange, onBlur, error,
+}: { value: string; onChange: (v: string) => void; onBlur?: () => void; error?: string }) {
+  const isPreset = DEFAULT_DEPARTMENTS.includes(value);
+  const [manualMode, setManualMode] = useState(value.length > 0 && !isPreset);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = useMemo(
+    () => DEFAULT_DEPARTMENTS.filter(d => d.toLowerCase().includes(query.trim().toLowerCase())),
+    [query]
+  );
+
+  if (manualMode) {
+    return (
+      <div>
+        <FieldLabel required>Department</FieldLabel>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            className="field"
+            type="text"
+            name="department"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            onBlur={onBlur}
+            placeholder="Enter department"
+            style={{ borderColor: error ? '#FCA5A5' : undefined, boxShadow: error ? '0 0 0 3px rgba(220,38,38,0.10)' : undefined }}
+          />
+          <button
+            type="button"
+            title="Choose from list instead"
+            onClick={() => { setManualMode(false); onChange(''); setQuery(''); }}
+            style={{
+              flexShrink: 0, padding: '0 12px', borderRadius: 8,
+              border: '1.5px solid var(--clr-border)', background: 'transparent',
+              fontSize: 11, fontWeight: 600, color: 'var(--clr-text-muted)', cursor: 'pointer',
+            }}
+          >
+            List
+          </button>
+        </div>
+        <FieldError message={error} />
+      </div>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <FieldLabel required>Department</FieldLabel>
+      <input
+        className="field"
+        type="text"
+        name="department"
+        value={open ? query : value}
+        onFocus={() => { setOpen(true); setQuery(''); }}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={onBlur}
+        placeholder="Search department…"
+        autoComplete="off"
+        style={{ borderColor: error ? '#FCA5A5' : undefined, boxShadow: error ? '0 0 0 3px rgba(220,38,38,0.10)' : undefined }}
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', zIndex: 20, top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: '#fff', border: '1px solid var(--clr-border)', borderRadius: 8,
+          maxHeight: 220, overflowY: 'auto', boxShadow: 'var(--shadow-md, 0 8px 20px rgba(0,0,0,0.12))',
+        }}>
+          {filtered.map(d => (
+            <div
+              key={d}
+              onMouseDown={() => { onChange(d); setOpen(false); }}
+              style={{ padding: '7px 10px', fontSize: 12.5, cursor: 'pointer', color: 'var(--clr-text)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--clr-bg)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              {d}
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div style={{ padding: '7px 10px', fontSize: 11.5, color: 'var(--clr-text-subtle)' }}>
+              No match — choose "Other" below
+            </div>
+          )}
+          <div
+            onMouseDown={() => { setManualMode(true); onChange(''); setOpen(false); }}
+            style={{
+              padding: '7px 10px', fontSize: 12.5, fontWeight: 600, color: 'var(--arna-accent)',
+              cursor: 'pointer', borderTop: '1px solid var(--clr-border)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--clr-bg)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            Other (type manually)
+          </div>
+        </div>
+      )}
       <FieldError message={error} />
     </div>
   );
@@ -475,9 +601,12 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
             <InlineInput label="Designation" type="text" name="designation" required value={data.employee.designation}
               onChange={handleEmployeeChange} onBlur={() => onBlurField?.('designation')}
               placeholder="Engineer" error={err('designation')} />
-            <InlineInput label="Department" type="text" name="department" required value={data.employee.department}
-              onChange={handleEmployeeChange} onBlur={() => onBlurField?.('department')}
-              placeholder="Engineering" error={err('department')} />
+            <DepartmentField
+              value={data.employee.department}
+              onChange={v => onChange({ ...data, employee: { ...data.employee, department: v } })}
+              onBlur={() => onBlurField?.('department')}
+              error={err('department')}
+            />
           </div>
           <InlineInput label="Date of Joining" type="date" name="doj" required value={data.employee.doj}
             onChange={handleEmployeeChange} onBlur={() => onBlurField?.('doj')}

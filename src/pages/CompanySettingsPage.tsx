@@ -6,8 +6,8 @@ import { Card } from '../components/ui/Card';
 import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock, Cloud, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../contexts/CurrencyContext';
 import {
-  getGoogleDriveStatus, connectGoogleDrive, disconnectGoogleDrive, testGoogleDriveConnection,
-  GoogleDriveStatus, ApiError as GoogleDriveApiError,
+  getGoogleDriveStatus, connectGoogleDrive, disconnectGoogleDrive, testGoogleDriveConnection, getGoogleDriveStorageStats,
+  GoogleDriveStatus, GoogleDriveStorageStats, ApiError as GoogleDriveApiError,
 } from '../api/googleDriveApi';
 
 interface Props {
@@ -120,14 +120,34 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
   const [driveLoading, setDriveLoading] = useState(true);
   const [driveActionPending, setDriveActionPending] = useState<'connect' | 'disconnect' | 'test' | null>(null);
   const [driveNotice, setDriveNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const [driveStats, setDriveStats] = useState<GoogleDriveStorageStats | null>(null);
+  const [driveStatsLoading, setDriveStatsLoading] = useState(false);
 
   const refreshDriveStatus = () => {
     setDriveLoading(true);
     getGoogleDriveStatus()
-      .then(setDriveStatus)
+      .then(status => {
+        setDriveStatus(status);
+        if (status.connected) {
+          setDriveStatsLoading(true);
+          getGoogleDriveStorageStats()
+            .then(setDriveStats)
+            .catch(() => setDriveStats(null))
+            .finally(() => setDriveStatsLoading(false));
+        } else {
+          setDriveStats(null);
+        }
+      })
       .catch(() => setDriveStatus({ connected: false }))
       .finally(() => setDriveLoading(false));
   };
+
+  function formatBytes(bytes: number): string {
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  }
 
   /* Reads the `?drive=connected` / `?drive=error&reason=...` query
      param the backend's OAuth callback redirects back with (see
@@ -578,6 +598,37 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                   </p>
                 </div>
               </div>
+
+              <div style={{ borderTop: '1px solid var(--clr-border)', paddingTop: 14 }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--clr-text-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Storage</p>
+                {driveStatsLoading ? (
+                  <p style={{ fontSize: 12, color: 'var(--clr-text-subtle)', margin: 0 }}>Loading storage stats…</p>
+                ) : driveStats ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+                    <div>
+                      <FieldLabel>Storage Used</FieldLabel>
+                      <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>{formatBytes(driveStats.totalStorageBytes)}</p>
+                    </div>
+                    <div>
+                      <FieldLabel>Salary Slips Stored</FieldLabel>
+                      <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>{driveStats.totalFiles}</p>
+                    </div>
+                    <div>
+                      <FieldLabel>Last Uploaded File</FieldLabel>
+                      <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0, wordBreak: 'break-word' }}>{driveStats.lastUploadedFile || '—'}</p>
+                    </div>
+                    <div>
+                      <FieldLabel>Last Upload Time</FieldLabel>
+                      <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>
+                        {driveStats.lastUploadedAt ? new Date(driveStats.lastUploadedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: 12, color: 'var(--clr-text-subtle)', margin: 0 }}>Storage stats unavailable right now.</p>
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', borderTop: '1px solid var(--clr-border)', paddingTop: 14 }}>
                 <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={handleTestDrive} disabled={!!driveActionPending}>
                   <RefreshCw size={13} /> {driveActionPending === 'test' ? 'Testing…' : 'Run Connection Test'}

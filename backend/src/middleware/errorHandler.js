@@ -41,9 +41,17 @@ export function errorHandler(err, req, res, next) {
     message = `Invalid value for ${err.path}.`;
   }
 
+  /* stage/reason (Sprint 6.2B): only present on errors that set
+     AppError's optional `stage` (currently the email pipeline), so a
+     client can branch on *which step* failed rather than just
+     pattern-matching the message string. `reason` mirrors `message`
+     under the name used in this app's own stage-aware error examples;
+     every other caller keeps reading `message` exactly as before. */
   res.status(statusCode).json({
     success: false,
     message,
+    stage: err.stage || null,
+    reason: message,
     data: null,
   });
 }

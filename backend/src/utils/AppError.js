@@ -6,10 +6,17 @@
  * without controllers having to know the status code themselves.
  */
 export class AppError extends Error {
-  constructor(message, statusCode = 500) {
+  /** `stage` is optional (Sprint 6.2B) — pipeline callers (currently
+      just the email send flow) can name which step failed
+      ("attachment" | "archive" | "drive" | "email" | "validation") so
+      the client gets more than a generic message. Omitted entirely
+      from the JSON response by errorHandler.js when not set, so every
+      other AppError call site is unaffected. */
+  constructor(message, statusCode = 500, stage) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
+    this.stage = stage;
     Error.captureStackTrace(this, this.constructor);
   }
 }

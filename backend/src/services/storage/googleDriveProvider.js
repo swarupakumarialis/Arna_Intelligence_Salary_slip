@@ -159,6 +159,14 @@ async function resolveMonthFolder(drive, year, month) {
   return monthFolderId;
 }
 
+/** Sprint 6.2B security requirement: uploaded salary slips must stay
+    private to the connected Google account. This function
+    deliberately never calls drive.permissions.create — a file
+    created via a user's own OAuth Drive access is private to that
+    account by default (no "anyone with the link" / public sharing)
+    unless something explicitly grants it, and nothing in this module
+    does. webViewLink (stored as shareUrl) still requires the viewer
+    to be signed in as the connected account to open. */
 export async function uploadFile({ buffer, fileName, year, month }) {
   const drive = await getDrive();
   const folderId = await resolveMonthFolder(drive, year, month);
@@ -188,6 +196,60 @@ export async function getFile(fileId) {
     fields: 'id, name, webViewLink, createdTime, size',
   });
   return data;
+}
+
+async function listChildren(drive, parentId, foldersOnly) {
+  const mimeClause = foldersOnly
+    ? " and mimeType = 'application/vnd.google-apps.folder'"
+    : " and mimeType != 'application/vnd.google-apps.folder'";
+  const { data } = await drive.files.list({
+    q: `'${parentId}' in parents and trashed = false${mimeClause}`,
+    fields: 'files(id, name, size, createdTime)',
+    spaces: 'drive',
+    pageSize: 1000,
+  });
+  return data.files || [];
+}
+
+/** Storage stats (Sprint 6.2B) for the Company Settings Google Drive
+    tab. The Drive API has no "size of this folder" call, so this
+    walks root → year folders → month folders → files and sums as it
+    goes — bounded by however many year/month folders this app has
+    ever created (small, since it's one folder per calendar month),
+    not by total Drive usage. Read-only; never called from the
+    upload/email path, only when the tab is actually viewed. */
+export async function getStorageStats() {
+  const connection = await GoogleDriveConnection.findById(SINGLETON_ID);
+  if (!connection || !connection.rootFolderId) {
+    return { totalFiles: 0, totalStorageBytes: 0, lastUploadedFile: null, lastUploadedAt: null };
+  }
+
+  const drive = await getDrive();
+  let totalFiles = 0;
+  let totalStorageBytes = 0;
+  let lastFile = null;
+
+  const yearFolders = await listChildren(drive, connection.rootFolderId, true);
+  for (const yearFolder of yearFolders) {
+    const monthFolders = await listChildren(drive, yearFolder.id, true);
+    for (const monthFolder of monthFolders) {
+      const files = await listChildren(drive, monthFolder.id, false);
+      for (const file of files) {
+        totalFiles += 1;
+        totalStorageBytes += Number(file.size) || 0;
+        if (!lastFile || new Date(file.createdTime) > new Date(lastFile.createdTime)) {
+          lastFile = file;
+        }
+      }
+    }
+  }
+
+  return {
+    totalFiles,
+    totalStorageBytes,
+    lastUploadedFile: lastFile ? lastFile.name : null,
+    lastUploadedAt: lastFile ? lastFile.createdTime : null,
+  };
 }
 
 export async function getStatus() {

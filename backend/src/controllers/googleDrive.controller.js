@@ -69,3 +69,17 @@ export const testConnection = asyncHandler(async (req, res) => {
     throw new AppError(`Google Drive connection test failed: ${err.message}`, 502);
   }
 });
+
+/** Storage Used / Slips Stored / Last Uploaded File / Last Upload
+    Time for the Company Settings Google Drive tab (Sprint 6.2B). */
+export const getStorageStats = asyncHandler(async (req, res) => {
+  try {
+    const data = await storageService.getStorageStats();
+    res.status(200).json({ success: true, message: 'Google Drive storage stats fetched', data });
+  } catch (err) {
+    if (err.code === 'NOT_CONNECTED') {
+      throw new AppError('Google Drive is not connected', 400);
+    }
+    throw new AppError(`Unable to fetch Google Drive storage stats: ${err.message}`, 502);
+  }
+});

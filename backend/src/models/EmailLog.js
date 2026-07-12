@@ -18,6 +18,10 @@ const emailLogSchema = new mongoose.Schema(
     subject: { type: String, trim: true, default: '' },
     status: { type: String, enum: ['Sent', 'Failed'], required: true },
     errorMessage: { type: String, trim: true, default: '' },
+    /** Which pipeline step a failed attempt died at (Sprint 6.2B) —
+        "attachment" | "archive" | "drive" | "email" | "validation".
+        Null for successful sends. */
+    stage: { type: String, default: null },
     sentAt: { type: Date, default: null },
   },
   { timestamps: true }

@@ -16,6 +16,13 @@ export interface GoogleDriveStatus {
   lastVerifiedAt?: string | null;
 }
 
+export interface GoogleDriveStorageStats {
+  totalFiles: number;
+  totalStorageBytes: number;
+  lastUploadedFile: string | null;
+  lastUploadedAt: string | null;
+}
+
 interface ApiEnvelope<T> {
   success: boolean;
   message: string;
@@ -76,4 +83,8 @@ export async function disconnectGoogleDrive(): Promise<void> {
 
 export async function testGoogleDriveConnection(): Promise<{ ok: boolean; user: string | null }> {
   return request<{ ok: boolean; user: string | null }>('/integrations/google-drive/test', { method: 'POST' });
+}
+
+export async function getGoogleDriveStorageStats(): Promise<GoogleDriveStorageStats> {
+  return request<GoogleDriveStorageStats>('/integrations/google-drive/stats');
 }

@@ -6,6 +6,7 @@ const router = Router();
 router.get('/auth-url', googleDriveController.getAuthUrl);
 router.get('/callback', googleDriveController.oauthCallback);
 router.get('/status', googleDriveController.getStatus);
+router.get('/stats', googleDriveController.getStorageStats);
 router.post('/disconnect', googleDriveController.disconnect);
 router.post('/test', googleDriveController.testConnection);
 

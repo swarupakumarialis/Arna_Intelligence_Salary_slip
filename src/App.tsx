@@ -226,6 +226,14 @@ export default function App() {
      would be. */
   const lastArchivedRef = useRef<{
     employeeId: string; month: string; year: string; salaryHistoryId: string; pdfArchiveId: string;
+    /** The exact in-memory PDF Blob generated for this export (Sprint
+        6.2B) — reused as-is for "Email Employee" so the email
+        attachment is never re-read from disk or re-downloaded from
+        Google Drive. Absent when the ref was populated by loading an
+        existing Salary History record rather than a fresh export
+        (see loadHistoryRecordIntoGenerator) — handleEmailEmployee
+        falls back to a fresh in-memory capture in that case. */
+    pdfBlob?: Blob;
   } | null>(null);
 
   /* Loads the Employee Directory from the backend once on mount. This
@@ -447,19 +455,15 @@ export default function App() {
     });
   }, [data.earnings, data.salary.workingDays, data.salary.lopDays]);
 
-  /* The one PDF-generation pipeline shared by every export/email/share
-     entry point (Export PDF, Email Employee, Share → Gmail/Outlook/
-     Download PDF). Validates, captures the off-screen PDF layer, and
-     builds the jsPDF document exactly as the original single-purpose
-     handleDownloadPDF always did — nothing about capture options,
-     timing, or the PDF's own layout changed in this extraction, only
-     the final `pdf.save(...)` call moved out to each caller, since
-     Email/Share need the document before deciding what to do with it.
-     Still records the Salary History + a 'salary_generated' activity
-     entry every time, same as before: a real slip was generated
-     regardless of which button triggered it. Returns null (after
-     showing the validation dialog) if the form isn't valid yet. */
-  const generateSalarySlipPdf = useCallback(async (): Promise<{ pdf: jsPDF; fileName: string } | null> => {
+  /* Sprint 6.2B: the validation + html2canvas + jsPDF capture, pulled
+     out of generateSalarySlipPdf so it can be reused by
+     handleEmailEmployee without also re-running that function's
+     history/archive side effects below. Returns the jsPDF document
+     alongside its rendered Blob — computed once here so every caller
+     (Export's Drive-upload multipart body, Email's attachment) works
+     from the exact same bytes rather than each calling
+     `pdf.output('blob')` separately. */
+  const capturePdfDocument = useCallback(async (): Promise<{ pdf: jsPDF; blob: Blob; fileName: string } | null> => {
     const errors = validateForm(data, brand);
     if (Object.keys(errors).length > 0) {
       setTouchedFields({
@@ -527,6 +531,26 @@ export default function App() {
     const pdfHeight = pdf.internal.pageSize.getHeight();
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
     const fileName = `Salary_Slip_${data.employee.name.replace(/\s+/g, '_')}_${data.salary.month}.pdf`;
+    // Computed once, here — every caller (Drive upload, email attachment) reuses this exact Blob.
+    const blob = pdf.output('blob');
+
+    return { pdf, blob, fileName };
+  }, [data, brand]);
+
+  /* The one PDF-generation pipeline shared by every export/email/share
+     entry point (Export PDF, Email Employee, Share → Gmail/Outlook/
+     Download PDF). Captures via capturePdfDocument above, then
+     records the Salary History + PDF Archive (local + Google Drive,
+     unchanged since Sprint 5.9/6.2A) side effects that only Export
+     should trigger — Email reuses the already-archived record's id
+     rather than calling this again. Still records a 'salary_generated'
+     activity entry every time, same as before: a real slip was
+     generated regardless of which button triggered it. Returns null
+     (after showing the validation dialog) if the form isn't valid yet. */
+  const generateSalarySlipPdf = useCallback(async (): Promise<{ pdf: jsPDF; fileName: string } | null> => {
+    const captured = await capturePdfDocument();
+    if (!captured) return null;
+    const { pdf, blob, fileName } = captured;
 
     /* Record the export in Salary History + the activity feed. Purely
        additive — nothing above this line (the actual PDF generation)
@@ -584,7 +608,7 @@ export default function App() {
       const linkedId = savedRecord.id;
       try {
         const archived = await uploadPdf({
-          file: pdf.output('blob'),
+          file: blob,
           fileName,
           employeeId: data.employee.id,
           employeeName: data.employee.name,
@@ -597,13 +621,17 @@ export default function App() {
         /* Written synchronously, not via setSalaryHistory above — see
            lastArchivedRef's declaration for why "Email Employee"
            checks this ref first rather than only the (React-render-
-           dependent) salaryHistory state. */
+           dependent) salaryHistory state. pdfBlob is the exact same
+           Blob just uploaded to Google Drive above (Sprint 6.2B) —
+           "Email Employee" attaches this directly, no disk/Drive
+           round-trip. */
         lastArchivedRef.current = {
           employeeId: data.employee.id,
           month: data.salary.month,
           year: String(data.salary.year),
           salaryHistoryId: linkedId,
           pdfArchiveId: archived._id,
+          pdfBlob: blob,
         };
       } catch (err) {
         console.error('Failed to archive PDF:', err);
@@ -613,7 +641,7 @@ export default function App() {
     setActivityLog(logActivity('salary_generated', data.employee.name, `${data.salary.month} ${data.salary.year}`));
 
     return { pdf, fileName };
-  }, [data, brand, employees]);
+  }, [capturePdfDocument, data, brand, employees]);
 
   const handleDownloadPDF = useCallback(async () => {
     try {
@@ -644,7 +672,7 @@ export default function App() {
      a different employee/period without re-exporting or re-loading
      correctly reads as "nothing archived yet" instead of reusing
      whatever was archived for the previous payslip. */
-  const findArchivedMatch = useCallback((): { id: string; pdfArchiveId: string } | null => {
+  const findArchivedMatch = useCallback((): { id: string; pdfArchiveId: string; pdfBlob: Blob | null } | null => {
     const ref = lastArchivedRef.current;
     if (
       ref &&
@@ -652,18 +680,25 @@ export default function App() {
       ref.month === data.salary.month &&
       ref.year === String(data.salary.year)
     ) {
-      return { id: ref.salaryHistoryId, pdfArchiveId: ref.pdfArchiveId };
+      return { id: ref.salaryHistoryId, pdfArchiveId: ref.pdfArchiveId, pdfBlob: ref.pdfBlob ?? null };
     }
     return null;
   }, [data.employee.id, data.salary.month, data.salary.year]);
 
-  /* Email Employee (Sprint 5.5) — sends the salary slip via real SMTP
-     from the backend, attaching the PDF that Export PDF already
-     archived. Deliberately does NOT call generateSalarySlipPdf(): the
-     PDF sent by email must always be the already-stored PDF from the
-     PDF Archive, never a fresh render. If no matching archived record
-     exists yet, the caller (see onEmailEmployee below) never opens
-     this modal in the first place. */
+  /* Email Employee (Sprint 5.5, refactored Sprint 6.2B) — sends the
+     salary slip via real SMTP from the backend, attaching the PDF as
+     an in-memory buffer the backend never has to read from disk or
+     re-download from Google Drive (that disk read was the root cause
+     of email failing in production while working on localhost — see
+     the Sprint 6.2B report). Reuses the exact Blob generateSalarySlipPdf
+     already captured and uploaded to Drive for this exact payslip
+     when available; if the archived record was loaded from Salary
+     History instead of just exported in this session (no cached Blob
+     — see lastArchivedRef's declaration), captures a fresh one here
+     via capturePdfDocument() rather than reading anything back from
+     storage. If no matching archived record exists yet at all, the
+     caller (see onEmailEmployee below) never opens this modal in the
+     first place. */
   const handleEmailEmployee = useCallback(async (to: string, subject: string) => {
     const match = findArchivedMatch();
     if (!match) {
@@ -673,6 +708,12 @@ export default function App() {
     }
     try {
       setIsGenerating(true);
+      let pdfBlob = match.pdfBlob;
+      if (!pdfBlob) {
+        const captured = await capturePdfDocument();
+        if (!captured) return; // validation dialog already shown by capturePdfDocument
+        pdfBlob = captured.blob;
+      }
       await sendSalaryEmail({
         employeeId: data.employee.id,
         employeeName: data.employee.name,
@@ -681,6 +722,7 @@ export default function App() {
         year: String(data.salary.year),
         salaryHistoryId: match.id,
         pdfArchiveId: match.pdfArchiveId,
+        pdfBlob,
         subject,
       });
       const sentAt = new Date().toISOString();
@@ -699,7 +741,7 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [findArchivedMatch, data.employee.id, data.employee.name]);
+  }, [findArchivedMatch, capturePdfDocument, data.employee.id, data.employee.name, data.salary.month, data.salary.year]);
 
   /* Guards the "Email Employee" entry point: only opens the modal if a
      PDF has already been archived for the current employee/month/year
