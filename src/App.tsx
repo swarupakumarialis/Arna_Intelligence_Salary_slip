@@ -67,7 +67,7 @@ export type { BrandConfig };
    the top nav); it's intentionally separate from BrandConfig.companyName,
    which is the tenant's legal entity name shown on the payslip. */
 const TEAM_DIRECTORY_TITLE = 'ARNA Team Directory';
-const APP_NAME = 'ARNA Salary Suite';
+const APP_NAME = 'Arna Intelligence IntelliPayRoll';
 
 /* ─── Validation types ─────────────────────────────────────── */
 export interface FormErrors {
@@ -501,6 +501,14 @@ export default function App() {
     });
     const imgData = canvas.toDataURL('image/jpeg', 1.0);
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    /* Document metadata only (Title/Creator, visible in a PDF viewer's
+       "Properties" panel) — not visible payslip content, so this is
+       pure rebranding, not a change to what the page itself shows. */
+    pdf.setProperties({
+      title: `Salary Slip – ${data.employee.name} – ${data.salary.month} ${data.salary.year}`,
+      creator: APP_NAME,
+      subject: 'Salary Slip',
+    });
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
@@ -854,9 +862,9 @@ export default function App() {
     <ProtectedRoute isAuthenticated={isAuthenticated} onLogin={login} appName={APP_NAME} logoDataUri={brand.logoDataUri}>
     <CurrencyProvider
       currency={brand.defaultCurrency || 'INR'}
-      exchangeRate={brand.exchangeRate || 86}
+      baseCurrency={brand.baseCurrency || 'INR'}
+      exchangeRates={brand.exchangeRates || {}}
       onCurrencyChange={(c: CurrencyCode) => setBrand({ ...brand, defaultCurrency: c })}
-      onExchangeRateChange={(r: number) => setBrand({ ...brand, exchangeRate: r })}
     >
     <div className="app-shell" style={{ background: 'var(--clr-bg)' }}>
 
@@ -991,7 +999,6 @@ export default function App() {
       <TopNav
         logoDataUri={brand.logoDataUri}
         appName={APP_NAME}
-        tagline="Payroll Management Platform"
         periodLabel={getCurrentPeriodLabel()}
         onLogout={logout}
       />

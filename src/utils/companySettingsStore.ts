@@ -1,5 +1,5 @@
 import { ARNA_LOGO_DATA_URI } from '../assets/arnaLogo';
-import type { CurrencyCode } from '../contexts/CurrencyContext';
+import type { CurrencyCode, ExchangeRates } from '../contexts/CurrencyContext';
 
 /**
  * White-label company identity + branding. This is the "company_settings"
@@ -38,13 +38,24 @@ export interface BrandConfig {
   signatoryName?: string;
   signatoryTitle?: string;
   signatoryImageUri?: string | null;
-  /* Display-only currency preference (see CurrencyContext) — payroll
-     is always calculated and stored in INR; these two fields only
-     control how amounts are *shown* across the Dashboard, Salary
-     History, Payroll Export, and Salary Generator screens. */
+  /* Display-only currency preference (see CurrencyContext / the
+     reusable service at utils/currencyService.ts) — payroll is always
+     calculated and stored in `baseCurrency`; these fields only control
+     how amounts are *shown*, across the Dashboard, Salary History,
+     Payroll Export, Salary Generator, Live Preview, and exported PDF. */
   defaultCurrency?: CurrencyCode;
-  /** 1 USD = exchangeRate INR. */
-  exchangeRate?: number;
+  /** Currency payroll amounts are actually calculated/stored in.
+      Defaults to INR — this is a Company Settings choice, not
+      something inferred, so an existing deployment never silently
+      reinterprets its already-stored numbers as a different currency. */
+  baseCurrency?: CurrencyCode;
+  /** Manually-maintained rates, one entry per non-base currency: "1
+      unit of this currency = N units of baseCurrency" (e.g. { USD: 96 }
+      when baseCurrency is INR). See utils/currencyService.ts. */
+  exchangeRates?: ExchangeRates;
+  /** ISO timestamp of the last manual exchange-rate edit, shown in
+      Company Settings; null until the admin edits a rate at least once. */
+  exchangeRateUpdatedAt?: string | null;
 }
 
 export const DEFAULT_BRAND: BrandConfig = {
@@ -75,24 +86,37 @@ export const DEFAULT_BRAND: BrandConfig = {
   signatoryTitle: 'Authorised Signatory',
   signatoryImageUri: null,
   defaultCurrency: 'INR',
-  exchangeRate: 86,
+  baseCurrency: 'INR',
+  exchangeRates: { USD: 96 },
+  exchangeRateUpdatedAt: null,
 };
 
 const STORAGE_KEY = 'arna_company_settings_v1';
 /** Pre-Sprint-2 storage key, when brand config lived inline in App.tsx. */
 const LEGACY_STORAGE_KEY = 'salary_slip_brand_v1';
 
+/** A record saved before this sprint has a single `exchangeRate: number`
+    (implicitly "1 USD = N INR") instead of the new `exchangeRates` map —
+    migrate it forward so an existing deployment doesn't lose its
+    already-configured USD rate the first time it loads post-upgrade. */
+function migrateLegacyExchangeRate(parsed: Partial<BrandConfig> & { exchangeRate?: number }): Partial<BrandConfig> {
+  if (parsed.exchangeRates || typeof parsed.exchangeRate !== 'number') return parsed;
+  const { exchangeRate, ...rest } = parsed;
+  return { ...rest, exchangeRates: { USD: exchangeRate } };
+}
+
 export function loadCompanySettings(): BrandConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<BrandConfig>;
+      const parsed = migrateLegacyExchangeRate(JSON.parse(raw) as Partial<BrandConfig>);
       return { ...DEFAULT_BRAND, ...parsed };
     }
     // One-time migration so existing users don't see their settings reset.
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (legacy) {
-      const merged = { ...DEFAULT_BRAND, ...(JSON.parse(legacy) as Partial<BrandConfig>) };
+      const parsed = migrateLegacyExchangeRate(JSON.parse(legacy) as Partial<BrandConfig>);
+      const merged = { ...DEFAULT_BRAND, ...parsed };
       saveCompanySettings(merged);
       return merged;
     }

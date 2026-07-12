@@ -14,7 +14,7 @@ const DOCUMENT_ITEMS = [
   { icon: ScrollText, label: 'HR Policies', desc: 'Company policy documents, versioned and published.' },
   { icon: Users, label: 'Employee Documents', desc: 'ID proofs, contracts, and other employee files.' },
   { icon: Building2, label: 'Company Documents', desc: 'Registrations, licenses, and compliance records.' },
-  { icon: BookOpen, label: 'User Guides', desc: 'How-to guides for using the ARNA Salary Suite.' },
+  { icon: BookOpen, label: 'User Guides', desc: 'How-to guides for using Arna Intelligence IntelliPayRoll.' },
 ];
 
 /** UI-only "Documents" destination (Sprint 5.7) — no backend, no

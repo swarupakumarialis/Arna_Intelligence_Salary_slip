@@ -497,12 +497,12 @@ select {
 
 .app-topnav {
   flex-shrink: 0;
-  height: 76px;
+  height: 80px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 0 30px;
+  gap: 28px;
+  padding: 0 36px;
   background: var(--clr-surface);
   border-bottom: 1px solid var(--clr-border);
   position: sticky;
@@ -513,7 +513,7 @@ select {
 .app-topnav-brand {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
 }
 
@@ -521,9 +521,11 @@ select {
   /* Wide box — matches the logo artwork's real aspect ratio (a
      horizontal icon + wordmark lockup, not a square mark), so
      object-fit: contain renders it at full legible size instead of
-     shrinking it to fit unused vertical space. */
-  width: 172px;
-  height: 54px;
+     shrinking it to fit unused vertical space. Sized ~24% smaller than
+     the original 172x54 (product polish — a cleaner, less dominant
+     mark against the extra whitespace above), aspect ratio unchanged. */
+  width: 130px;
+  height: 41px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -538,17 +540,10 @@ select {
 }
 
 .app-topnav-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--clr-text);
   letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-
-.app-topnav-subtitle {
-  font-size: 11px;
-  color: var(--clr-text-muted);
-  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -664,7 +659,6 @@ select {
   .sidebar-link span.sidebar-link-label { display: none; }
   .sidebar-link { justify-content: center; padding: 11px; }
   .page-container.app-page { padding-top: 20px; padding-bottom: 40px; }
-  .app-topnav-subtitle { display: none; }
 }
 
 /* ============================================================

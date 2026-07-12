@@ -14,7 +14,7 @@ interface Props {
  * hits a real API (after a JWT/MongoDB migration); it only cares about
  * the boolean result.
  */
-export function LoginPage({ onLogin, appName = 'ARNA Salary Suite', logoDataUri }: Props) {
+export function LoginPage({ onLogin, appName = 'Arna Intelligence IntelliPayRoll', logoDataUri }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

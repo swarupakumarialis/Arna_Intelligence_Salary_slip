@@ -1,7 +1,8 @@
 import React from 'react';
 import { SalaryData, TaxConfig } from '../../types';
 import { BrandConfig } from '../../App';
-import { formatCurrency, amountToWords } from '../../utils/currency';
+import { amountToWords } from '../../utils/currencyService';
+import { useCurrency } from '../../contexts/CurrencyContext';
 import { PDFWatermark } from './PDFWatermark';
 import { PDFHeader } from './PDFHeader';
 import { PDFEmployeeInfo } from './PDFEmployeeInfo';
@@ -55,10 +56,12 @@ export function SalarySlipPDF({ data, brand, taxConfig, pdfRef }: Props) {
   const totalDeductions = data.deductions.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const netPay          = totalEarnings - totalDeductions;
 
-  const currency = taxConfig?.currency || 'INR';
-  const locale   = taxConfig?.locale   || 'en-IN';
-  const fmt      = (n: number) => formatCurrency(n, currency, locale);
-  const netPayWords = amountToWords(netPay, currency);
+  /* Amounts above are always calculated/held in the configured base
+     currency (see CurrencyContext) — convert/format is display-only,
+     applied here exactly like every other screen in the app, so the
+     exported PDF matches whatever currency is currently selected. */
+  const { currency, convert, format: fmt } = useCurrency();
+  const netPayWords = amountToWords(convert(netPay), currency);
 
   const now = new Date();
   const generatedDate = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });

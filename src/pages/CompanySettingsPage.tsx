@@ -3,8 +3,8 @@ import { BrandConfig } from '../utils/companySettingsStore';
 import { FormErrors, TouchedFields } from '../App';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
-import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast } from 'lucide-react';
-import { CurrencyCode, CURRENCY_META } from '../contexts/CurrencyContext';
+import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock } from 'lucide-react';
+import { CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../contexts/CurrencyContext';
 
 interface Props {
   brand: BrandConfig;
@@ -27,8 +27,6 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ size?: num
   { key: 'pdf', label: 'PDF', icon: FileText },
   { key: 'advanced', label: 'Advanced', icon: Wallet },
 ];
-
-const CURRENCY_OPTIONS: CurrencyCode[] = ['INR', 'USD'];
 
 function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
@@ -277,44 +275,110 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
       )}
 
       {tab === 'currency' && (
-        <Card title="Currency">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
-            <div>
-              <FieldLabel>Default Currency</FieldLabel>
-              <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>
-                Shown in the top navigation and used across the Dashboard, Salary History, and Payroll Export.
-              </p>
-              <select
-                className="field"
-                value={brand.defaultCurrency || 'INR'}
-                onChange={e => onBrandChange({ ...brand, defaultCurrency: e.target.value as CurrencyCode })}
-              >
-                {CURRENCY_OPTIONS.map(c => (
-                  <option key={c} value={c}>{CURRENCY_META[c].symbol} {c} — {CURRENCY_META[c].label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <FieldLabel>Exchange Rate</FieldLabel>
-              <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>
-                Example: 1 USD = 86 INR. Used only to convert displayed values — payroll is always calculated and stored in INR.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--clr-text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>1 USD =</span>
-                <input
-                  type="number"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="Currency Settings" icon={<Coins size={13} />}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginBottom: 20 }}>
+              <div>
+                <FieldLabel>Default Currency</FieldLabel>
+                <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>
+                  What the whole app displays by default — Dashboard, Salary Generator, Salary History, Payroll Summary, the Live Preview, and the exported PDF.
+                </p>
+                <select
                   className="field"
-                  min={0.01}
-                  step="0.01"
-                  value={brand.exchangeRate ?? 86}
-                  onChange={e => onBrandChange({ ...brand, exchangeRate: Number(e.target.value) || 1 })}
-                  style={{ maxWidth: 120 }}
-                />
-                <span style={{ fontSize: 12.5, color: 'var(--clr-text-muted)', fontWeight: 600 }}>INR</span>
+                  value={brand.defaultCurrency || 'INR'}
+                  onChange={e => onBrandChange({ ...brand, defaultCurrency: e.target.value as CurrencyCode })}
+                >
+                  {CURRENCY_CODES.map(c => (
+                    <option key={c} value={c}>{CURRENCY_META[c].symbol} {c} — {CURRENCY_META[c].label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <FieldLabel>Base Currency</FieldLabel>
+                <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>
+                  What payroll is actually calculated and stored in. Every other currency's exchange rate below is quoted against this one.
+                </p>
+                <select
+                  className="field"
+                  value={brand.baseCurrency || 'INR'}
+                  onChange={e => onBrandChange({ ...brand, baseCurrency: e.target.value as CurrencyCode })}
+                >
+                  {CURRENCY_CODES.map(c => (
+                    <option key={c} value={c}>{CURRENCY_META[c].symbol} {c} — {CURRENCY_META[c].label}</option>
+                  ))}
+                </select>
               </div>
             </div>
-          </div>
-        </Card>
+
+            <div style={{ borderTop: '1px solid var(--clr-border)', paddingTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                <FieldLabel>Exchange Rates</FieldLabel>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: 10.5, fontWeight: 700, color: 'var(--arna-slate)',
+                  background: 'var(--clr-bg)', border: '1px solid var(--clr-border)',
+                  borderRadius: 999, padding: '3px 9px',
+                }}>
+                  <Clock size={10} />
+                  Last updated {brand.exchangeRateUpdatedAt
+                    ? new Date(brand.exchangeRateUpdatedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : 'never'}
+                </span>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 14px' }}>
+                Rates are entered manually today, one per currency, quoted against the base currency above (e.g. 1 USD = 96 {brand.baseCurrency || 'INR'}). Payroll amounts are never rewritten — only how they're displayed changes.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                {CURRENCY_CODES.filter(c => c !== (brand.baseCurrency || 'INR')).map(code => (
+                  <div key={code}>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--clr-text-muted)', display: 'block', marginBottom: 5 }}>
+                      {CURRENCY_META[code].symbol} {code} — {CURRENCY_META[code].label}
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>1 {code} =</span>
+                      <input
+                        type="number"
+                        className="field"
+                        min={0.0001}
+                        step="0.01"
+                        value={brand.exchangeRates?.[code] ?? ''}
+                        placeholder="e.g. 96"
+                        onChange={e => {
+                          const value = Number(e.target.value);
+                          onBrandChange({
+                            ...brand,
+                            exchangeRates: { ...brand.exchangeRates, [code]: value > 0 ? value : undefined },
+                            exchangeRateUpdatedAt: new Date().toISOString(),
+                          });
+                        }}
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', fontWeight: 600 }}>{brand.baseCurrency || 'INR'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Future Integration" icon={<Zap size={13} />} bodyStyle={{ opacity: 0.9 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0, marginTop: 1,
+                fontSize: 9.5, fontWeight: 700, color: 'var(--arna-amber)',
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+                background: '#FFFBEB', border: '1px solid #FDE68A',
+                borderRadius: 999, padding: '2px 8px',
+              }}>
+                <Sparkles size={9} /> Manual Today
+              </span>
+              <p style={{ fontSize: 11.5, color: 'var(--clr-text-subtle)', margin: 0, lineHeight: 1.6 }}>
+                Exchange rates are entered by hand above. A future release can fetch live rates from an exchange-rate API automatically —
+                the app is already built for this: every screen reads rates through one shared currency service, so switching to a live
+                feed later only means changing where that one service gets its numbers from, not any individual page.
+              </p>
+            </div>
+          </Card>
+        </div>
       )}
 
       {tab === 'advanced' && (

@@ -1,6 +1,7 @@
 import React from 'react';
 import { SalaryData, TaxConfig } from '../types';
-import { formatCurrency, amountToWords } from '../utils/currency';
+import { amountToWords } from '../utils/currencyService';
+import { useCurrency } from '../contexts/CurrencyContext';
 import { withAlpha } from '../utils/color';
 import { BrandConfig } from '../App';
 
@@ -105,10 +106,11 @@ export function SalarySlipPreview({ data, previewRef, taxConfig, brand }: Props)
   const totalDeductions = data.deductions.reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const netPay          = totalEarnings - totalDeductions;
 
-  const currency    = taxConfig?.currency || 'INR';
-  const locale      = taxConfig?.locale   || 'en-IN';
-  const fmt         = (n: number) => formatCurrency(n, currency, locale);
-  const netPayWords = amountToWords(netPay, currency);
+  /* Amounts above are always calculated/held in the configured base
+     currency (see CurrencyContext) — convert/format is display-only,
+     applied here exactly like every other screen in the app. */
+  const { currency, convert, format: fmt } = useCurrency();
+  const netPayWords = amountToWords(convert(netPay), currency);
 
   const now   = new Date();
   const today = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });

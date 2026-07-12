@@ -1,76 +1,77 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
+import {
+  CurrencyCode, CURRENCY_META, CURRENCY_CODES, ExchangeRates,
+  convertAmount, convertAndFormat, resolveExchangeRates,
+} from '../utils/currencyService';
 
-export type CurrencyCode = 'INR' | 'USD';
-
-export const CURRENCY_META: Record<CurrencyCode, { symbol: string; locale: string; label: string }> = {
-  INR: { symbol: '₹', locale: 'en-IN', label: 'Indian Rupee' },
-  USD: { symbol: '$', locale: 'en-US', label: 'US Dollar' },
-};
+export type { CurrencyCode, ExchangeRates };
+export { CURRENCY_META, CURRENCY_CODES };
 
 interface CurrencyContextValue {
+  /** Currency the app is currently *displaying* amounts in. */
   currency: CurrencyCode;
-  /** 1 USD = exchangeRate INR (e.g. 86). */
-  exchangeRate: number;
+  /** Currency payroll amounts are actually calculated/stored in — INR
+      by default. Changing this is a Company Settings action, not a
+      display toggle; see companySettingsStore.ts. */
+  baseCurrency: CurrencyCode;
+  /** Manually-maintained rates, each "1 unit of this currency = N units
+      of baseCurrency" (e.g. { USD: 96 } when base is INR). */
+  exchangeRates: ExchangeRates;
   setCurrency: (c: CurrencyCode) => void;
-  setExchangeRate: (r: number) => void;
-  /** Formats an amount that is always calculated and stored in INR —
-      payroll math never changes, this only decides how the number
-      is *displayed*. */
-  format: (amountInInr: number) => string;
+  /** Converts a base-currency amount to the currently selected display
+      currency, without formatting — for callers that need the raw
+      number (e.g. the payslip's amount-in-words line). */
+  convert: (amountInBase: number) => number;
+  /** Converts *and* formats a base-currency amount for display — the
+      one function most screens actually call. */
+  format: (amountInBase: number) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 
 interface ProviderProps {
   currency: CurrencyCode;
-  exchangeRate: number;
+  baseCurrency: CurrencyCode;
+  exchangeRates: ExchangeRates;
   onCurrencyChange: (c: CurrencyCode) => void;
-  onExchangeRateChange: (r: number) => void;
   children: React.ReactNode;
 }
 
 /**
- * App-wide currency display — the one place an INR amount is
- * converted + formatted for the screen. Every payroll number in this
- * app (SalaryItem.amount, SalaryHistoryRecord totals, etc.) is always
- * calculated and persisted in INR; this context never touches that —
- * it just multiplies by 1/exchangeRate for display when the selected
- * currency is USD, then formats via Intl.NumberFormat.
+ * App-wide currency display — the one place a base-currency amount is
+ * converted + formatted for the screen, backed entirely by
+ * utils/currencyService.ts (no conversion/formatting logic lives here
+ * or anywhere else — see that file for the reusable implementation).
+ * Every payroll number in this app (SalaryItem.amount, SalaryHistoryRecord
+ * totals, etc.) is always calculated and persisted in `baseCurrency`;
+ * this context never touches that — it only decides how the number is
+ * *displayed*, including on the Live Preview and exported PDF.
  *
- * currency/exchangeRate are owned by App.tsx and backed by
- * BrandConfig.defaultCurrency / BrandConfig.exchangeRate, so the
- * top-nav quick switcher and Company Settings' Currency tab both
- * read/write the exact same persisted value — there's no separate
- * "session" currency to fall out of sync.
- *
- * Deliberately NOT used by SalarySlipPreview.tsx or components/pdf/**:
- * the payslip itself is the authoritative payroll record and always
- * shows real INR, regardless of what the rest of the app is displaying.
+ * currency/baseCurrency/exchangeRates are owned by App.tsx and backed
+ * by BrandConfig, so the top-nav quick switcher and Company Settings'
+ * Currency tab both read/write the exact same persisted value.
  */
-export function CurrencyProvider({ currency, exchangeRate, onCurrencyChange, onExchangeRateChange, children }: ProviderProps) {
-  const format = useCallback((amountInInr: number): string => {
-    const rate = exchangeRate > 0 ? exchangeRate : 1;
-    const converted = currency === 'USD' ? amountInInr / rate : amountInInr;
-    const meta = CURRENCY_META[currency];
-    try {
-      return new Intl.NumberFormat(meta.locale, {
-        style: 'currency',
-        currency,
-        minimumFractionDigits: currency === 'USD' ? 2 : 0,
-        maximumFractionDigits: currency === 'USD' ? 2 : 0,
-      }).format(converted);
-    } catch {
-      return `${meta.symbol}${converted.toFixed(2)}`;
-    }
-  }, [currency, exchangeRate]);
+export function CurrencyProvider({ currency, baseCurrency, exchangeRates, onCurrencyChange, children }: ProviderProps) {
+  const rates = useMemo(() => resolveExchangeRates(exchangeRates), [exchangeRates]);
+
+  const convert = useCallback(
+    (amountInBase: number) => convertAmount(amountInBase, currency, baseCurrency, rates),
+    [currency, baseCurrency, rates]
+  );
+
+  const format = useCallback(
+    (amountInBase: number) => convertAndFormat(amountInBase, currency, baseCurrency, rates),
+    [currency, baseCurrency, rates]
+  );
 
   const value = useMemo<CurrencyContextValue>(() => ({
     currency,
-    exchangeRate,
+    baseCurrency,
+    exchangeRates: rates,
     setCurrency: onCurrencyChange,
-    setExchangeRate: onExchangeRateChange,
+    convert,
     format,
-  }), [currency, exchangeRate, onCurrencyChange, onExchangeRateChange, format]);
+  }), [currency, baseCurrency, rates, onCurrencyChange, convert, format]);
 
   return <CurrencyContext.Provider value={value}>{children}</CurrencyContext.Provider>;
 }

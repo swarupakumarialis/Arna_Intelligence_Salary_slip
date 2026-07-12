@@ -39,7 +39,7 @@ import Employee from '../models/Employee.js';
 const ARNA_TEAM_SEED = [
   {
     employeeId: 'ARNA/INT001', name: 'Swarupa Kumari',
-    email: 'swarupakumari062@gmail.com', phone: '8787413004',
+    email: 'swarupa.kumari@alis-global.com', phone: '8787413004',
     address: 'Village Baghauna, PO: Baghauna, Siwan, Bihar - 841210',
     department: '', designation: 'AI Systems & Operations Intern',
     employmentType: 'Intern', doj: '2026-03-09', status: 'Active',
@@ -53,14 +53,14 @@ const ARNA_TEAM_SEED = [
   },
   {
     employeeId: 'ARNA/CONT002', name: 'Debanka Maiti',
-    email: 'debankamaiti1990@gmail.com', phone: '9130564451',
+    email: 'debankamaiti@alis-global.com', phone: '9130564451',
     address: 'A-301, Wisteria CHS, Manjari Road, Keshav Nagar, Mundhwa, Pune, Maharashtra - 411036',
     department: '', designation: 'Chief Operating Officer',
     employmentType: 'Contract', doj: '2026-02-01', status: 'Active',
   },
   {
     employeeId: 'ARNA/CONT003', name: 'Niharika Sarkar',
-    email: 'niharikaofficial.2023@gmail.com', phone: '07683001610',
+    email: 'niharika.sarkar@alis-global.com', phone: '07683001610',
     address: 'Amma Ashram Lane D-48, Naveli, Vasant Kunj, Delhi - 110070',
     department: '', designation: 'Strategic Contributor',
     employmentType: 'Contract', doj: '2026-04-03', status: 'Active',
@@ -73,21 +73,21 @@ const ARNA_TEAM_SEED = [
   },
   {
     employeeId: 'ARNA/CONT005', name: 'Sushma Karnati',
-    email: 'sushmakarnati14@gmail.com', phone: '9182002801',
+    email: 'sushma.karnati@alis-global.com', phone: '9182002801',
     address: 'Hayathnagar, Hyderabad',
     department: '', designation: 'AI-Native Full-Stack & Middleware Engineer',
     employmentType: 'Contract', doj: '2026-06-09', status: 'Active',
   },
   {
     employeeId: 'ARNA/CONT007', name: 'Shashank Sekhar',
-    email: 'shashank.shekhar2k17@gmail.com', phone: '9956820045',
+    email: 'shashank.shekhar@alis-global.com', phone: '9956820045',
     address: '18 Satya Puram Colony, Balaganj, Lucknow, Uttar Pradesh - 226003',
     department: '', designation: 'Fullstack Engineer',
     employmentType: 'Contract', doj: '2026-06-22', status: 'Active',
   },
   {
     employeeId: 'ARNA/CONT008', name: 'Rohit Throat',
-    email: 'thoratrohit25@gmail.com', phone: '9082873256',
+    email: 'rohit.thorat@alis-global.com', phone: '9082873256',
     address: 'Flat No. 808, Siddhivinayak Society, Siddharth Nagar, Kopri Colony, Thane East, Maharashtra',
     department: '', designation: 'Strategic Contributor',
     employmentType: 'Contract', doj: '2000-10-25', status: 'Active',
@@ -100,7 +100,7 @@ const ARNA_TEAM_SEED = [
 // the ARNA Team Directory (explicit instruction from an earlier sprint).
 const ARNA_EMPLOYEE_ENRICHMENT = {
   'ARNA/INT001': {
-    email: 'swarupakumari062@gmail.com', phone: '8787413004',
+    email: 'swarupa.kumari@alis-global.com', phone: '8787413004',
     address: 'Village Baghauna, PO: Baghauna, Siwan, Bihar - 841210',
     designation: 'AI Systems & Operations Intern', doj: '2026-03-09',
   },
@@ -110,27 +110,27 @@ const ARNA_EMPLOYEE_ENRICHMENT = {
     designation: 'Strategic Contributor', doj: '2025-10-20',
   },
   'ARNA/CONT002': {
-    email: 'debankamaiti1990@gmail.com', phone: '9130564451',
+    email: 'debankamaiti@alis-global.com', phone: '9130564451',
     address: 'A-301, Wisteria CHS, Manjari Road, Keshav Nagar, Mundhwa, Pune, Maharashtra - 411036',
     designation: 'Chief Operating Officer', doj: '2026-02-01',
   },
   'ARNA/CONT003': {
-    email: 'niharikaofficial.2023@gmail.com', phone: '07683001610',
+    email: 'niharika.sarkar@alis-global.com', phone: '07683001610',
     address: 'Amma Ashram Lane D-48, Naveli, Vasant Kunj, Delhi - 110070',
     designation: 'Strategic Contributor', doj: '2026-04-03',
   },
   'ARNA/CONT005': {
-    email: 'sushmakarnati14@gmail.com', phone: '9182002801',
+    email: 'sushma.karnati@alis-global.com', phone: '9182002801',
     address: 'Hayathnagar, Hyderabad',
     designation: 'AI-Native Full-Stack & Middleware Engineer', doj: '2026-06-09',
   },
   'ARNA/CONT007': {
-    email: 'shashank.shekhar2k17@gmail.com', phone: '9956820045',
+    email: 'shashank.shekhar@alis-global.com', phone: '9956820045',
     address: '18 Satya Puram Colony, Balaganj, Lucknow, Uttar Pradesh - 226003',
     designation: 'Fullstack Engineer', doj: '2026-06-22',
   },
   'ARNA/CONT008': {
-    email: 'thoratrohit25@gmail.com', phone: '9082873256',
+    email: 'rohit.thorat@alis-global.com', phone: '9082873256',
     address: 'Flat No. 808, Siddhivinayak Society, Siddharth Nagar, Kopri Colony, Thane East, Maharashtra',
     designation: 'Strategic Contributor', doj: '2000-10-25',
   },

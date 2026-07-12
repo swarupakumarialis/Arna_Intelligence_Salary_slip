@@ -18,13 +18,38 @@ let cachedTransporter = null;
 
 /** Lazily built so a missing/blank EMAIL_USER/EMAIL_PASS doesn't break
     server startup — it only surfaces as a send failure, caught and
-    logged the same as any other SMTP error. Gmail's "service" shorthand
-    is assumed since EMAIL_USER/EMAIL_PASS are the only two email env
-    vars defined (no EMAIL_HOST/EMAIL_PORT) — see Known Limitations. */
+    logged the same as any other SMTP error.
+ *
+ * Root cause of the production "Connection timeout" (investigated —
+ * see Sprint report): this previously used Nodemailer's `service:
+ * 'gmail'` shorthand with no explicit network options. On Render
+ * (and most container-based hosts), Node's default DNS resolution
+ * order tries the SMTP host's IPv6 address first; Render's outbound
+ * networking does not reliably route that IPv6 connection to Gmail,
+ * so the TCP handshake hangs until Nodemailer's default connection
+ * timeout (2 minutes) elapses — surfacing as exactly "Connection
+ * timeout", even though credentials, the attachment, and everything
+ * else about the send were correct. This never reproduced locally
+ * because most local/dev networks either lack IPv6 entirely or have
+ * it fully routed, so the first (IPv6) attempt just works there.
+ *
+ * Fix: force IPv4 (`family: 4`) so the client never attempts the
+ * unreliable IPv6 path, and set explicit (shorter) timeouts so any
+ * genuine connectivity problem fails fast with a clear error instead
+ * of hanging for the full default duration. `host`/`port`/`secure`
+ * are now explicit rather than relying on the `service: 'gmail'`
+ * shorthand's internal mapping — same endpoint, easier to reason
+ * about and to change if Gmail is ever swapped for another provider. */
 function getTransporter() {
   if (!cachedTransporter) {
     cachedTransporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      family: 4, // force IPv4 — see root-cause note above
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,

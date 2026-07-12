@@ -1,16 +1,13 @@
 import React from 'react';
 import { Building2, LogOut, User } from 'lucide-react';
-import { useCurrency, CurrencyCode, CURRENCY_META } from '../../contexts/CurrencyContext';
+import { useCurrency, CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../../contexts/CurrencyContext';
 
 interface Props {
   logoDataUri: string | null;
   appName: string;
-  tagline: string;
   periodLabel: string;
   onLogout?: () => void;
 }
-
-const CURRENCY_OPTIONS: CurrencyCode[] = ['INR', 'USD'];
 
 /**
  * Top navigation bar — branding, current payroll period, a global
@@ -22,20 +19,20 @@ const CURRENCY_OPTIONS: CurrencyCode[] = ['INR', 'USD'];
  * Deliberately does not display the literal login username — the
  * simple-auth credential is a shared operator login, not a personal
  * account, so the chrome shows a role label ("HR Admin") instead.
+ *
+ * No tagline/subtitle under the product name — logo + name only, per
+ * the cleaner, more premium nav treatment.
  */
-export function TopNav({ logoDataUri, appName, tagline, periodLabel, onLogout }: Props) {
+export function TopNav({ logoDataUri, appName, periodLabel, onLogout }: Props) {
   const { currency, setCurrency } = useCurrency();
 
   return (
     <header className="app-topnav">
       <div className="app-topnav-brand">
         <div className="app-topnav-logo">
-          {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={26} />}
+          {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={22} />}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div className="app-topnav-title">{appName}</div>
-          <div className="app-topnav-subtitle">{tagline}</div>
-        </div>
+        <div className="app-topnav-title" style={{ minWidth: 0 }}>{appName}</div>
       </div>
 
       <div className="app-topnav-right">
@@ -45,9 +42,9 @@ export function TopNav({ logoDataUri, appName, tagline, periodLabel, onLogout }:
           value={currency}
           onChange={e => setCurrency(e.target.value as CurrencyCode)}
           aria-label="Display currency"
-          title="Display currency — payroll is always stored in INR"
+          title="Display currency — payroll is always stored in the configured base currency"
         >
-          {CURRENCY_OPTIONS.map(c => (
+          {CURRENCY_CODES.map(c => (
             <option key={c} value={c}>{CURRENCY_META[c].symbol} {c}</option>
           ))}
         </select>
