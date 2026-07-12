@@ -234,6 +234,20 @@ export default function App() {
      (the directory modal) keeps it in sync afterwards via
      onEmployeesChange every time it opens or a record is added/edited/
      deleted, so this effect only needs to run once. */
+  /* Google Drive OAuth (Sprint 6.2A): the backend's /callback route
+     redirects the browser back here with a `?drive=connected` or
+     `?drive=error&reason=...` query param — this app has no URL
+     router (activePage is plain state, see above), so the only way
+     to land the user back on Company Settings after that redirect is
+     to detect the param on mount and switch pages here.
+     CompanySettingsPage reads the same param itself to select its
+     Google Drive tab and show a notice, then strips it from the URL. */
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('drive')) {
+      setActivePage('settings');
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     getEmployees({ limit: 1000 })

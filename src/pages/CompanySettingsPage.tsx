@@ -3,8 +3,12 @@ import { BrandConfig } from '../utils/companySettingsStore';
 import { FormErrors, TouchedFields } from '../App';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
-import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock } from 'lucide-react';
+import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock, Cloud, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../contexts/CurrencyContext';
+import {
+  getGoogleDriveStatus, connectGoogleDrive, disconnectGoogleDrive, testGoogleDriveConnection,
+  GoogleDriveStatus, ApiError as GoogleDriveApiError,
+} from '../api/googleDriveApi';
 
 interface Props {
   brand: BrandConfig;
@@ -17,7 +21,7 @@ interface Props {
   onSettingsChanged: () => void;
 }
 
-type TabKey = 'brand' | 'company' | 'currency' | 'display' | 'pdf' | 'advanced';
+type TabKey = 'brand' | 'company' | 'currency' | 'display' | 'pdf' | 'google-drive' | 'advanced';
 
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { key: 'brand', label: 'Brand', icon: Palette },
@@ -25,6 +29,7 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ size?: num
   { key: 'currency', label: 'Currency', icon: Coins },
   { key: 'display', label: 'Display', icon: ToggleLeft },
   { key: 'pdf', label: 'PDF', icon: FileText },
+  { key: 'google-drive', label: 'Google Drive', icon: Cloud },
   { key: 'advanced', label: 'Advanced', icon: Wallet },
 ];
 
@@ -105,6 +110,85 @@ const DISPLAY_TOGGLES: { key: keyof BrandConfig; label: string }[] = [
  */
 export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors, touched, onBlurField, onSettingsChanged }: Props) {
   const [tab, setTab] = useState<TabKey>('brand');
+
+  /* Google Drive connection (Sprint 6.2A). Status is fetched fresh on
+     mount rather than kept in App.tsx's shared state — this is the
+     only place in the app that needs it, following the same
+     "fetch where it's used" pattern as the rest of this page (which
+     otherwise only ever reads/writes the brand prop). */
+  const [driveStatus, setDriveStatus] = useState<GoogleDriveStatus | null>(null);
+  const [driveLoading, setDriveLoading] = useState(true);
+  const [driveActionPending, setDriveActionPending] = useState<'connect' | 'disconnect' | 'test' | null>(null);
+  const [driveNotice, setDriveNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  const refreshDriveStatus = () => {
+    setDriveLoading(true);
+    getGoogleDriveStatus()
+      .then(setDriveStatus)
+      .catch(() => setDriveStatus({ connected: false }))
+      .finally(() => setDriveLoading(false));
+  };
+
+  /* Reads the `?drive=connected` / `?drive=error&reason=...` query
+     param the backend's OAuth callback redirects back with (see
+     App.tsx, which switches to this page when it sees that param),
+     shows a one-time notice, opens this tab, then strips the param so
+     a refresh doesn't re-show it. */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const drive = params.get('drive');
+    if (drive === 'connected') {
+      setTab('google-drive');
+      setDriveNotice({ kind: 'success', message: 'Google Drive connected successfully.' });
+    } else if (drive === 'error') {
+      setTab('google-drive');
+      setDriveNotice({ kind: 'error', message: `Google Drive connection failed: ${params.get('reason') || 'unknown error'}` });
+    }
+    if (drive) {
+      params.delete('drive');
+      params.delete('reason');
+      const rest = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    }
+    refreshDriveStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleConnectDrive = async () => {
+    setDriveActionPending('connect');
+    try {
+      await connectGoogleDrive(); // navigates away to Google's consent screen
+    } catch (err) {
+      setDriveNotice({ kind: 'error', message: err instanceof GoogleDriveApiError ? err.message : 'Unable to start Google Drive connection' });
+      setDriveActionPending(null);
+    }
+  };
+
+  const handleDisconnectDrive = async () => {
+    setDriveActionPending('disconnect');
+    try {
+      await disconnectGoogleDrive();
+      setDriveNotice({ kind: 'success', message: 'Google Drive disconnected.' });
+      refreshDriveStatus();
+    } catch (err) {
+      setDriveNotice({ kind: 'error', message: err instanceof GoogleDriveApiError ? err.message : 'Failed to disconnect Google Drive' });
+    } finally {
+      setDriveActionPending(null);
+    }
+  };
+
+  const handleTestDrive = async () => {
+    setDriveActionPending('test');
+    try {
+      const result = await testGoogleDriveConnection();
+      setDriveNotice({ kind: 'success', message: `Connection healthy (${result.user || 'verified'}).` });
+      refreshDriveStatus();
+    } catch (err) {
+      setDriveNotice({ kind: 'error', message: err instanceof GoogleDriveApiError ? err.message : 'Connection test failed' });
+    } finally {
+      setDriveActionPending(null);
+    }
+  };
 
   const err = (field: keyof Omit<FormErrors, 'deductions'>) =>
     touched[field] ? errors[field] : undefined;
@@ -447,6 +531,76 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
               </label>
             </div>
           </div>
+        </Card>
+      )}
+
+      {tab === 'google-drive' && (
+        <Card title="Google Drive" icon={<Cloud size={13} />}>
+          {driveNotice && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600,
+              padding: '8px 12px', borderRadius: 8, marginBottom: 16,
+              color: driveNotice.kind === 'success' ? '#166534' : '#991B1B',
+              background: driveNotice.kind === 'success' ? '#F0FDF4' : '#FEF2F2',
+              border: `1px solid ${driveNotice.kind === 'success' ? '#BBF7D0' : '#FECACA'}`,
+            }}>
+              {driveNotice.kind === 'success' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+              {driveNotice.message}
+            </div>
+          )}
+
+          {driveLoading ? (
+            <p style={{ fontSize: 12, color: 'var(--clr-text-subtle)' }}>Checking connection status…</p>
+          ) : driveStatus?.connected ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#166534' }}>
+                <CheckCircle2 size={16} /> Connected
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+                <div>
+                  <FieldLabel>Google Account Email</FieldLabel>
+                  <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>{driveStatus.email || '—'}</p>
+                </div>
+                <div>
+                  <FieldLabel>Drive Root Folder</FieldLabel>
+                  <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>{driveStatus.rootFolderName || 'Arna Intelligence IntelliPayRoll'}</p>
+                </div>
+                <div>
+                  <FieldLabel>Connected Since</FieldLabel>
+                  <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>
+                    {driveStatus.connectedAt ? new Date(driveStatus.connectedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                  </p>
+                </div>
+                <div>
+                  <FieldLabel>Last Verified</FieldLabel>
+                  <p style={{ fontSize: 12.5, color: 'var(--clr-text)', margin: 0 }}>
+                    {driveStatus.lastVerifiedAt ? new Date(driveStatus.lastVerifiedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', borderTop: '1px solid var(--clr-border)', paddingTop: 14 }}>
+                <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={handleTestDrive} disabled={!!driveActionPending}>
+                  <RefreshCw size={13} /> {driveActionPending === 'test' ? 'Testing…' : 'Run Connection Test'}
+                </button>
+                <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={handleConnectDrive} disabled={!!driveActionPending}>
+                  <Cloud size={13} /> {driveActionPending === 'connect' ? 'Redirecting…' : 'Reconnect'}
+                </button>
+                <button className="btn btn-secondary" style={{ fontSize: 12, color: '#991B1B' }} onClick={handleDisconnectDrive} disabled={!!driveActionPending}>
+                  <XCircle size={13} /> {driveActionPending === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 12.5, color: 'var(--clr-text-subtle)', margin: 0 }}>
+                Connect Google Drive once to automatically upload every generated salary slip into
+                "Arna Intelligence IntelliPayRoll" / Year / Month, organised alongside the local archive.
+              </p>
+              <button className="btn btn-primary" style={{ fontSize: 12, alignSelf: 'flex-start' }} onClick={handleConnectDrive} disabled={!!driveActionPending}>
+                <Cloud size={13} /> {driveActionPending === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
+              </button>
+            </div>
+          )}
         </Card>
       )}
 

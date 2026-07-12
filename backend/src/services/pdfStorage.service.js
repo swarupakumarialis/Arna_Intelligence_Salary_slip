@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import PdfArchive from '../models/PdfArchive.js';
 import SalaryHistory from '../models/SalaryHistory.js';
 import { AppError } from '../utils/AppError.js';
-import { uploadPdfToDrive, deletePdfFromDrive } from './googleDrive.service.js';
+import * as storageService from './storage/storageService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** backend/generated-pdfs — the one existing storage location from
@@ -96,9 +96,10 @@ function resolveWithinStorageRoot(relativePath) {
  * the only place that write happens; salaryHistory.service.js itself
  * is untouched.
  *
- * Sprint 5.9 — once the local archive above is safely written, also
- * uploads the same bytes to Google Drive as an additional copy (see
- * googleDrive.service.js). That step is strictly best-effort: it runs
+ * Sprint 5.9 (now OAuth-based as of Sprint 6.2A) — once the local
+ * archive above is safely written, also uploads the same bytes to
+ * Google Drive as an additional copy (see services/storage/). That
+ * step is strictly best-effort: it runs
  * after everything the caller actually needs (the local file, the
  * PdfArchive record, the Salary History link) has already succeeded,
  * and any Drive failure is caught and logged here rather than thrown
@@ -154,17 +155,19 @@ export async function storePdf({ buffer, employeeId, employeeName, month, year, 
   // purely additive and must never turn a successful export into a
   // failure, so it's wrapped in its own try/catch with no rethrow.
   try {
-    const { driveFileId, shareUrl } = await uploadPdfToDrive({ buffer, fileName, year, month });
+    const { fileId, shareUrl } = await storageService.upload({ buffer, fileName, year, month });
     const updated = await PdfArchive.findByIdAndUpdate(
       archive._id,
-      { provider: 'google-drive', driveFileId, shareUrl, uploadedAt: new Date() },
+      { provider: 'google-drive', driveFileId: fileId, shareUrl, uploadedAt: new Date() },
       { new: true }
     );
     if (updated) archive = updated;
   } catch (err) {
     // Local archive (file + metadata + Salary History link) is
-    // already durable — a Drive failure only ever shows up here as a
-    // server-side warning, never as an error surfaced to the export.
+    // already durable — a Drive failure (including "not connected",
+    // which is expected until HR completes the OAuth flow once) only
+    // ever shows up here as a server-side warning, never as an error
+    // surfaced to the export.
     console.warn('[googleDrive] Upload failed — local PDF archive is unaffected:', err.message);
   }
 
@@ -207,7 +210,7 @@ export async function deletePdfArchive(id) {
     // Best-effort, same reasoning as the upload side in storePdf():
     // a Drive failure here must not stop the local file/metadata from
     // being removed as requested.
-    await deletePdfFromDrive(archive.driveFileId).catch(err => {
+    await storageService.deleteFile(archive.driveFileId).catch(err => {
       console.warn('[googleDrive] Delete failed — local cleanup still proceeding:', err.message);
     });
   }
