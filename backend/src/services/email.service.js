@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import mongoose from 'mongoose';
 import EmailLog from '../models/EmailLog.js';
 import SalaryHistory from '../models/SalaryHistory.js';
@@ -6,122 +6,79 @@ import PdfArchive from '../models/PdfArchive.js';
 import { AppError } from '../utils/AppError.js';
 
 /**
- * Email Automation service (Sprint 5.5, refactored Sprint 6.2B).
+ * Email Automation service (Sprint 5.5, refactored Sprint 6.2B,
+ * transport migrated to Resend Sprint 6.3).
  *
- * Sprint 6.2B root-cause fix: this used to fetch the PDF to attach by
- * reading it back off local disk via pdfStorage.service.js's
- * getPdfFilePath() — that worked on localhost but failed in
- * production on Render, where nothing guarantees the file written by
- * an earlier "Export PDF" request is still on disk (or on the same
- * instance) by the time "Email" runs as a separate request. The
- * caller now sends the exact same in-memory PDF buffer it already
- * generated for Google Drive upload directly in this request — this
- * service never reads from disk and never re-downloads from Drive,
- * it only ever attaches the bytes it was handed. See
- * controllers/email.controller.js / routes/email.routes.js for the
- * multer wiring that turns the multipart upload into `buffer` below.
+ * Sprint 6.2B root-cause fix (still in effect, unchanged by this
+ * migration): this used to fetch the PDF to attach by reading it back
+ * off local disk — that worked on localhost but failed in production
+ * on Render, since nothing guarantees a file written by an earlier
+ * "Export PDF" request is still on disk (or on the same instance) by
+ * the time "Email" runs as a separate request. The caller sends the
+ * exact same in-memory PDF buffer it already generated for Google
+ * Drive upload directly in this request — this service never reads
+ * from disk and never re-downloads from Drive, it only ever attaches
+ * the bytes it was handed. See controllers/email.controller.js /
+ * routes/email.routes.js for the multer wiring that turns the
+ * multipart upload into `buffer` below.
+ *
+ * Sprint 6.3 transport migration: Gmail SMTP is gone. Diagnostics
+ * (Sprint 6.2F's network-test endpoint) proved Render cannot open an
+ * outbound TCP connection to smtp.gmail.com on either 465 or 587 at
+ * all — a network/infrastructure block, not anything fixable from
+ * transporter config (host/port/secure/family all correct; the
+ * connection itself never established). Resend sends over HTTPS to
+ * Resend's API instead of a raw SMTP socket, sidestepping that
+ * blocked path entirely. Everything downstream of "how the bytes
+ * leave this process" — validation, Drive verification, EmailLog,
+ * SalaryHistory updates, the API contract — is unchanged.
  */
 
 const PDF_MAGIC_BYTES = '%PDF-';
 
-let cachedTransporter = null;
+let cachedResendClient = null;
 
-/** Never logs the real address — just enough to confirm in Render's
-    logs that EMAIL_USER is actually set and roughly what it is
-    ("sw***@gmail.com"), without putting a real mailbox address in
-    plaintext logs. */
-function maskEmail(email) {
-  if (!email) return '(not set)';
-  const [local, domain] = String(email).split('@');
-  if (!domain) return '***';
-  const visible = local.slice(0, 2);
-  return `${visible}${'*'.repeat(Math.max(local.length - 2, 1))}@${domain}`;
+/** Never logs the real key — just enough to confirm in Render's logs
+    that RESEND_API_KEY is actually set, without putting a live secret
+    in plaintext logs. */
+function maskApiKey(key) {
+  if (!key) return '(not set)';
+  return `${key.slice(0, 6)}${'*'.repeat(Math.max(key.length - 6, 4))}`;
 }
 
-/** Lazily built so a missing/blank EMAIL_USER/EMAIL_PASS doesn't break
-    server startup — it only surfaces as a send failure, caught and
-    logged the same as any other SMTP error.
- *
- * Investigated for the production hotfix ("localhost sends, Render
- * times out, despite Drive/Mongo/PDF/attachment all succeeding" —
- * i.e. the failure is specifically at the SMTP connection stage).
- * There is exactly one transporter defined anywhere in this backend
- * (this function) — no duplicate/stale config elsewhere that could
- * explain the deployed process using something different from what's
- * below; the log line this function prints on first use is the
- * ground truth for whatever is actually running.
- *
- * The prior fix forced IPv4 (`family: 4`) on the theory that Render's
- * outbound networking couldn't route Gmail's IPv6 address — that
- * remains in place below (it's still correct and harmless either
- * way), but port 465 (implicit TLS) continuing to time out even with
- * IPv6 ruled out points at the port itself, not the IP family: 465
- * requires the TLS handshake to begin immediately on connect, and
- * several PaaS/container network layers (Render's outbound proxy
- * among them, by report) are known to stall or drop that specific
- * handshake pattern while still allowing a plain TCP connect followed
- * by an explicit STARTTLS upgrade on port 587 through cleanly. Gmail
- * supports both on smtp.gmail.com; 587 + STARTTLS is Google's own
- * documented "if 465 doesn't work in your environment" fallback.
- * `requireTLS: true` keeps this from ever silently sending over an
- * unencrypted connection if the STARTTLS upgrade fails — the send
- * fails loudly instead. */
-function getTransporter() {
-  if (!cachedTransporter) {
-    const config = {
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // STARTTLS on 587, not implicit TLS — see comment above
-      requireTLS: true,
-      family: 4, // force IPv4 — see comment above
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
-    };
-    console.log('[email] Creating SMTP transporter:', {
-      host: config.host,
-      port: config.port,
-      secure: config.secure,
-      requireTLS: config.requireTLS,
-      family: config.family,
-      connectionTimeout: config.connectionTimeout,
-      greetingTimeout: config.greetingTimeout,
-      socketTimeout: config.socketTimeout,
-      service: 'gmail (explicit host, not the "service: gmail" shorthand)',
-      EMAIL_USER: maskEmail(process.env.EMAIL_USER),
+/** Lazily built so a missing RESEND_API_KEY doesn't break server
+    startup — it only surfaces as a send failure, caught and logged
+    the same as any other Resend error. There is exactly one Resend
+    client defined anywhere in this backend (this function) — no
+    duplicate/stale config elsewhere. */
+function getResendClient() {
+  if (!cachedResendClient) {
+    console.log('[email] Creating Resend client:', {
+      RESEND_API_KEY: maskApiKey(process.env.RESEND_API_KEY),
+      EMAIL_FROM: process.env.EMAIL_FROM || '(not set)',
     });
-    cachedTransporter = nodemailer.createTransport({
-      ...config,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    cachedResendClient = new Resend(process.env.RESEND_API_KEY);
   }
-  return cachedTransporter;
+  return cachedResendClient;
 }
 
-/** Connection-only health check (Production Hotfix) — verifies the
-    SMTP handshake (DNS + TCP connect + STARTTLS + auth) independent
-    of sending an actual message, so a boot-time log can say
-    definitively "SMTP reachable" or show the exact failing stage
-    (err.code) without waiting for a real "Email Employee" click.
-    Called once from server.js on startup; safe to call again anytime
-    (e.g. from a future health-check route) since it reuses the same
-    cached transporter. */
+/** Boot-time config sanity check (replaces the old SMTP
+    verifyEmailTransporter — there's no persistent connection to a
+    stateless HTTPS API to "verify" the same way; this just confirms
+    the required env vars are present, in the boot logs, before any
+    real "Email Employee" click). Called once from server.js. */
 export async function verifyEmailTransporter() {
-  try {
-    await getTransporter().verify();
-    console.log('[email] SMTP connection verified OK.');
-    return true;
-  } catch (err) {
-    console.error('[email] SMTP verification FAILED:', {
-      code: err.code,
-      command: err.command,
-      message: err.message,
+  const hasKey = Boolean(process.env.RESEND_API_KEY);
+  const hasFrom = Boolean(process.env.EMAIL_FROM);
+  if (hasKey && hasFrom) {
+    console.log('[email] Resend config present: RESEND_API_KEY and EMAIL_FROM are both set.');
+  } else {
+    console.error('[email] Resend config INCOMPLETE:', {
+      RESEND_API_KEY: hasKey ? 'set' : 'MISSING',
+      EMAIL_FROM: hasFrom ? 'set' : 'MISSING',
     });
-    return false;
   }
+  return hasKey && hasFrom;
 }
 
 function buildSubject({ month, year }) {
@@ -149,34 +106,67 @@ Team HR
 Arna Intelligence`;
 }
 
+/** HTML version of the exact same copy as buildBody above — same
+    subject, same words, same sign-off, just wrapped for clients that
+    render HTML. text (buildBody) is always sent alongside this as the
+    plain-text fallback, so nothing about the actual message content
+    changes with this migration. */
+function buildHtmlBody({ employeeName, month, year }) {
+  const paragraphs = [
+    `Dear ${employeeName},`,
+    'I hope you are doing well.',
+    `Please find attached your salary slip for the month of ${month} ${year}.`,
+    'Kindly review the attached document for your records. If you have any questions or notice any discrepancies, please feel free to reach out to the HR team.',
+    'Thank you for your continued dedication and valuable contributions to Arna Intelligence. We truly appreciate your commitment and wish you continued success.',
+    'Best regards,<br>Team HR<br>Arna Intelligence',
+  ];
+  const body = paragraphs.map((p) => `<p style="margin:0 0 14px;">${p}</p>`).join('\n');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;line-height:1.6;">${body}</div>`;
+}
+
 function assertValidObjectId(id, label) {
   if (id && !mongoose.Types.ObjectId.isValid(id)) {
     throw new AppError(`Invalid ${label}`, 400, 'validation');
   }
 }
 
-/** Turns a raw SMTP/network error into a specific, loggable reason
-    instead of a bare "Failed to send email" (Sprint 6.2B requirement
-    2). Nodemailer/Node's SMTP transport surfaces the failure kind via
-    `err.code`; falls back to matching the message text for the few
-    cases that don't set one. */
-function categorizeSmtpError(err) {
-  const code = err.code || '';
-  const message = (err.message || '').toLowerCase();
+/** Turns a Resend error into a specific, loggable reason instead of a
+    bare "Failed to send email" (requirement carried over from Sprint
+    6.2B). Resend's SDK returns `{data: null, error: {name, message,
+    statusCode}}` for API-level failures (see resend/dist/index.d.cts'
+    RESEND_ERROR_CODE_KEY) rather than throwing; a thrown err here
+    means the HTTPS request to Resend's API itself failed (DNS/network
+    level, before Resend ever saw the request). */
+function categorizeResendError(err) {
+  const name = err?.name || '';
+  const message = err?.message || 'Resend send failed';
 
-  if (code === 'EAUTH' || message.includes('invalid login') || message.includes('username and password not accepted')) {
-    return 'SMTP authentication failed — check EMAIL_USER / EMAIL_PASS (must be a Gmail App Password, not the account login password)';
+  switch (name) {
+    case 'missing_api_key':
+    case 'invalid_api_key':
+    case 'restricted_api_key':
+      return 'Resend authentication failed — check RESEND_API_KEY';
+    case 'invalid_from_address':
+      return 'Invalid sender address — check EMAIL_FROM';
+    case 'invalid_attachment':
+      return 'Resend rejected the PDF attachment';
+    case 'rate_limit_exceeded':
+      return 'Resend rate limit exceeded — try again shortly';
+    case 'monthly_quota_exceeded':
+    case 'daily_quota_exceeded':
+      return 'Resend sending quota exceeded';
+    case 'validation_error':
+    case 'missing_required_field':
+    case 'invalid_parameter':
+      return `Resend rejected the request: ${message}`;
+    case 'security_error':
+      return 'Resend blocked this request for security reasons';
+    case 'internal_server_error':
+    case 'application_error':
+      return 'Resend service error — try again shortly';
+    default:
+      return message;
   }
-  if (code === 'ETIMEDOUT' || message.includes('timeout')) {
-    return 'SMTP connection timeout — the mail server did not respond in time';
-  }
-  if (code === 'ECONNECTION' || code === 'ESOCKET' || message.includes('econnrefused') || message.includes('connect')) {
-    return 'SMTP connection error — unable to reach the mail server';
-  }
-  if (code === 'EENVELOPE' || message.includes('recipient') || message.includes('envelope')) {
-    return 'SMTP rejected the recipient address';
-  }
-  return err.message || 'SMTP send failed';
 }
 
 /** Best-effort audit log write for a failed attempt — never allowed
@@ -261,20 +251,29 @@ export async function sendSalaryEmail({
     );
   }
 
+  const html = buildHtmlBody({ employeeName, month, year });
+
   try {
-    await getTransporter().sendMail({
-      from: process.env.EMAIL_USER,
+    const { error } = await getResendClient().emails.send({
+      from: process.env.EMAIL_FROM,
       to: recipientEmail,
       subject,
       text: body,
+      html,
       // filename intentionally taken from the archive record, not the
       // client — this is the exact same name storePdf() gave the file
       // it archived and uploaded to Drive, e.g. "ARNA_CONT001_July_2026.pdf".
       attachments: [{ filename: archive.pdfFileName, content: buffer, contentType: 'application/pdf' }],
     });
+    if (error) {
+      // API-level failure (Resend responded, but rejected the send) —
+      // thrown here so the single catch block below handles both this
+      // and a genuine network-level throw the same way.
+      throw error;
+    }
   } catch (err) {
-    const reason = categorizeSmtpError(err);
-    console.error('[email] SMTP send failed:', { code: err.code, message: err.message, recipientEmail });
+    const reason = categorizeResendError(err);
+    console.error('[email] Resend send failed:', { name: err?.name, message: err?.message, recipientEmail });
     await logFailure({ ...logContext, stage: 'email', reason });
     if (salaryHistoryId) {
       await SalaryHistory.findByIdAndUpdate(salaryHistoryId, {

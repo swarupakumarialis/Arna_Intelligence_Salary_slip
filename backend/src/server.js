@@ -19,11 +19,10 @@ async function start() {
     console.log(`[server] ARNA Salary Suite API running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
   });
 
-  // Best-effort, non-blocking (Production Hotfix): logs whether SMTP
-  // is actually reachable from wherever this process is running,
-  // right in the boot logs — on Render this is the fastest way to
-  // confirm the deployed transporter config without waiting for a
-  // real "Email Employee" click. Never delays or fails startup.
+  // Best-effort, non-blocking: logs whether RESEND_API_KEY/EMAIL_FROM
+  // (Sprint 6.3 — email now sends via the Resend API, not SMTP) are
+  // actually set, right in the boot logs, without waiting for a real
+  // "Email Employee" click to find out. Never delays or fails startup.
   verifyEmailTransporter().catch(() => {});
 }
 
