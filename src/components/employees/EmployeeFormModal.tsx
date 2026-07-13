@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Employee, EmploymentType } from '../../types';
-import { createEmployee, updateEmployee, ApiError } from '../../api/employeeApi';
+import { createEmployee, updateEmployee, uploadEmployeePhoto, deleteEmployeePhoto, ApiError } from '../../api/employeeApi';
 import { ArrowLeft, X, Upload, User, Loader2, AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -66,15 +66,56 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
 
+  /* Photo (Production Hotfix): the file is staged here, not read as
+     base64 into `editing` — that base64-in-JSON approach is exactly
+     what caused 413 "request entity too large" errors once a real
+     photo blew past express.json()'s default 100kb limit. The actual
+     upload happens after the employee record itself is saved (see
+     handleSave), via a dedicated multipart endpoint, so it never
+     touches the JSON payload at all. photoPreviewUrl is a local
+     object URL purely for the in-modal preview before that upload
+     completes — revoked below whenever it's replaced or the modal
+     unmounts, so it never leaks. */
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [removePhotoRequested, setRemovePhotoRequested] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
+
   // Re-seed local edit state whenever a different employee record is opened.
   const [lastId, setLastId] = useState(employee.id);
   if (employee.id !== lastId) {
     setLastId(employee.id);
     setEditing(employee);
     setFormError('');
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    setRemovePhotoRequested(false);
   }
 
   if (!isOpen) return null;
+
+  const handlePhotoSelected = (file: File) => {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    setRemovePhotoRequested(false);
+  };
+
+  const handleRemovePhoto = () => {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    // Only need a server round-trip if there's a persisted photo to
+    // actually delete from Drive — a still-staged, never-saved photo
+    // just disappears locally.
+    if (editing.photoUrl) setRemovePhotoRequested(true);
+  };
 
   const handleSave = async () => {
     if (!editing.employeeId.trim() || !editing.name.trim()) {
@@ -84,7 +125,22 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
     setSaving(true);
     setFormError('');
     try {
-      const saved = isExisting ? await updateEmployee(editing.id, editing) : await createEmployee(editing);
+      let saved = isExisting ? await updateEmployee(editing.id, editing) : await createEmployee(editing);
+
+      // Photo step runs after the record is safely saved, and is
+      // deliberately best-effort from here on — a Drive hiccup must
+      // never turn an otherwise-successful employee save into a
+      // reported failure (same pattern as PDF archiving in App.tsx).
+      try {
+        if (photoFile) {
+          saved = await uploadEmployeePhoto(saved.id, photoFile);
+        } else if (removePhotoRequested) {
+          saved = await deleteEmployeePhoto(saved.id);
+        }
+      } catch (photoErr) {
+        setToast(errorMessage(photoErr, 'Employee saved, but the photo upload failed. Try uploading it again.'));
+      }
+
       onSaved(saved, isExisting);
     } catch (err) {
       if (isConnectionError(err)) {
@@ -96,6 +152,8 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
       setSaving(false);
     }
   };
+
+  const displayedPhotoUrl = photoPreviewUrl || (removePhotoRequested ? null : editing.photoUrl);
 
   return createPortal(
     <div
@@ -166,23 +224,20 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
                 background: 'var(--clr-bg)', border: '1px solid var(--clr-border)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
               }}>
-                {editing.photoDataUri
-                  ? <img src={editing.photoDataUri} alt={editing.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {displayedPhotoUrl
+                  ? <img src={displayedPhotoUrl} alt={editing.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <User size={20} style={{ color: 'var(--clr-text-subtle)' }} />}
               </div>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', border: '1.5px dashed var(--clr-border)', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, color: 'var(--clr-text-muted)' }}>
                 <Upload size={13} />
-                {editing.photoDataUri ? 'Change Photo' : 'Upload Photo'}
+                {displayedPhotoUrl ? 'Change Photo' : 'Upload Photo'}
                 <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
                   const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onloadend = () => setEditing({ ...editing, photoDataUri: reader.result as string });
-                  reader.readAsDataURL(file);
+                  if (file) handlePhotoSelected(file);
                 }} />
               </label>
-              {editing.photoDataUri && (
-                <button onClick={() => setEditing({ ...editing, photoDataUri: null })} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }} title="Remove photo">
+              {displayedPhotoUrl && (
+                <button onClick={handleRemovePhoto} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }} title="Remove photo">
                   <X size={13} />
                 </button>
               )}

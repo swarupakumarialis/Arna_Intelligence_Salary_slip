@@ -38,7 +38,13 @@ interface EmployeeApiRecord {
   PAN?: string;
   Aadhaar?: string;
   salaryDetails?: string;
+  /** Legacy base64 photo — see models/Employee.js. Only ever read now
+      (as a display fallback), never written by this file's payload. */
   photoDataUri?: string | null;
+  /** Google Drive URL for an uploaded photo (Production Hotfix) — set
+      only by uploadEmployeePhoto below, via a dedicated multipart
+      endpoint, never by createEmployee/updateEmployee's JSON body. */
+  photoUrl?: string | null;
   uan?: string;
   manager?: string;
   emergencyContact?: string;
@@ -92,7 +98,10 @@ function fromApiRecord(record: EmployeeApiRecord): Employee {
     department: record.department || '',
     designation: record.designation || '',
     employmentType: (record.employmentType || undefined) as Employee['employmentType'],
-    photoDataUri: record.photoDataUri ?? null,
+    // photoUrl wins when set (Drive-backed upload); falls back to the
+    // legacy base64 field for any record that hasn't been re-uploaded
+    // since the Production Hotfix — either way it's just an <img src>.
+    photoUrl: record.photoUrl || record.photoDataUri || null,
     salaryStructureNote: record.salaryDetails || '',
     pan: record.PAN || '',
     aadhaar: record.Aadhaar || '',
@@ -131,7 +140,9 @@ function toApiPayload(employee: Employee): Record<string, unknown> {
     PAN: employee.pan || '',
     Aadhaar: employee.aadhaar || '',
     salaryDetails: employee.salaryStructureNote || '',
-    photoDataUri: employee.photoDataUri ?? null,
+    // photoUrl/photoDataUri deliberately omitted (Production Hotfix):
+    // photos are set exclusively via uploadEmployeePhoto below, a
+    // dedicated multipart endpoint — never embedded in this JSON body.
     uan: employee.uan || '',
     manager: employee.manager || '',
     emergencyContact: employee.emergencyContact || '',
@@ -208,6 +219,42 @@ export async function updateEmployee(id: string, employee: Employee): Promise<Em
 
 export async function deleteEmployee(id: string): Promise<void> {
   await request<null>(`/employees/${id}`, { method: 'DELETE' });
+}
+
+/** Uploads a profile photo for an already-saved employee (Production
+    Hotfix) — multipart, straight to Google Drive server-side, never
+    embedded as base64 in a JSON body (that was the cause of the 413
+    "request entity too large" errors: express.json()'s default
+    100kb limit, blown past by any real photo once base64-inflated).
+    Deliberately a standalone fetch, not the shared JSON request()
+    helper above — same reasoning as pdfApi.ts's uploadPdf: a FormData
+    body must not have a manually-set Content-Type header. */
+export async function uploadEmployeePhoto(id: string, file: Blob): Promise<Employee> {
+  const formData = new FormData();
+  formData.append('photo', file);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/employees/${id}/photo`, { method: 'POST', body: formData });
+  } catch {
+    throw new ApiError('Unable to connect to server');
+  }
+
+  let body: ApiEnvelope<EmployeeApiRecord> | null = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* Non-JSON response — fall through, handled by the !res.ok check below. */
+  }
+  if (!res.ok || !body?.success) {
+    throw new ApiError(body?.message || `Request failed (${res.status})`, res.status);
+  }
+  return fromApiRecord(body.data);
+}
+
+export async function deleteEmployeePhoto(id: string): Promise<Employee> {
+  const record = await request<EmployeeApiRecord>(`/employees/${id}/photo`, { method: 'DELETE' });
+  return fromApiRecord(record);
 }
 
 export async function searchEmployees(query: string, params: PaginationParams = {}): Promise<PaginatedEmployees> {

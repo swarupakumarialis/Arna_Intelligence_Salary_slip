@@ -21,6 +21,12 @@ const googleDriveConnectionSchema = new mongoose.Schema(
     googleEmail: { type: String, trim: true, default: null },
     rootFolderId: { type: String, default: null },
     rootFolderName: { type: String, default: 'Arna Intelligence IntelliPayRoll' },
+    /** Cached id of the separate "Employee Photos" root folder
+        (Production Hotfix — employee profile pictures). Deliberately
+        its own top-level folder, not nested under rootFolderId above:
+        that field and everything under it stays exclusively the
+        salary-slip archive tree, untouched by this feature. */
+    photoFolderId: { type: String, default: null },
     scopes: { type: [String], default: [] },
     connectedAt: { type: Date, default: Date.now },
     lastVerifiedAt: { type: Date, default: null },

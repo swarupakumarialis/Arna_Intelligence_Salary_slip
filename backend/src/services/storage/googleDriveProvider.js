@@ -182,6 +182,48 @@ export async function uploadFile({ buffer, fileName, year, month }) {
   return { fileId: data.id, shareUrl: data.webViewLink || null };
 }
 
+const PHOTO_ROOT_FOLDER_NAME = 'Employee Photos';
+const PHOTO_MIME_EXTENSIONS = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+/** Employee profile pictures (Production Hotfix). Deliberately a
+    separate top-level Drive folder from ROOT_FOLDER_NAME/
+    resolveMonthFolder above — this never reads or writes anything
+    under the salary-slip "Arna Intelligence IntelliPayRoll" tree, and
+    that tree's own folder-resolution/caching (rootFolderId) is
+    untouched. Same privacy invariant as uploadFile above: no
+    drive.permissions.create call, so the file stays private to the
+    connected account. */
+async function resolvePhotoFolder(drive) {
+  const connection = await GoogleDriveConnection.findById(SINGLETON_ID);
+  let photoFolderId = connection?.photoFolderId || null;
+  if (!photoFolderId) {
+    photoFolderId = await findOrCreateFolder(drive, PHOTO_ROOT_FOLDER_NAME, null);
+    await GoogleDriveConnection.findByIdAndUpdate(SINGLETON_ID, { photoFolderId });
+  }
+  return photoFolderId;
+}
+
+export async function uploadEmployeePhoto({ buffer, employeeId, mimeType }) {
+  const drive = await getDrive();
+  const folderId = await resolvePhotoFolder(drive);
+  const ext = PHOTO_MIME_EXTENSIONS[mimeType] || 'jpg';
+  const safeEmployeeId = String(employeeId || 'unknown').replace(/[/\\]/g, '_');
+  const fileName = `${safeEmployeeId}_${Date.now()}.${ext}`;
+
+  const { data } = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType, body: Readable.from(buffer) },
+    fields: 'id, webViewLink',
+  });
+
+  return { fileId: data.id, url: data.webViewLink || null };
+}
+
 async function removeFile(fileId) {
   const drive = await getDrive();
   await drive.files.delete({ fileId });

@@ -4,10 +4,24 @@ import { AppError } from '../utils/AppError.js';
 
 /** Drops a blank email entirely rather than storing "" — required for
     the schema's sparse unique index to actually treat "no email" as
-    "no email" instead of colliding with every other blank email. */
+    "no email" instead of colliding with every other blank email.
+    Also strips photoDataUri (Production Hotfix): that field is
+    legacy-read-only now — a base64 photo embedded in this plain JSON
+    payload is exactly what produced 413 "request entity too large"
+    errors, since express.json()'s default 100kb limit blows well
+    past for any real image. Photos are set exclusively via the
+    dedicated multipart upload endpoint (employee.controller.js's
+    uploadPhoto → photoUrl/photoFileId), never through this payload —
+    stripping it here means even a stale frontend build or a direct
+    API call can't reintroduce the bug. */
 function sanitizeInput(data = {}) {
   const clean = { ...data };
   if (!clean.email) delete clean.email;
+  // Block (re)setting a base64 blob — but keep allowing explicit
+  // clearing (photoDataUri: null), which employee.controller.js's
+  // uploadPhoto/deletePhoto rely on to retire a legacy photo once
+  // it's replaced or removed.
+  if (clean.photoDataUri) delete clean.photoDataUri;
   return clean;
 }
 

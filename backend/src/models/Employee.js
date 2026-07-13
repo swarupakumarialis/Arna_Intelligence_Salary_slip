@@ -69,7 +69,29 @@ const employeeSchema = new mongoose.Schema(
     salaryDetails: { type: String, trim: true, default: '' },
 
     // Extended fields — see file-level comment.
+    /** Legacy: whole photo stored as a base64 data URI directly in
+        this document (Production Hotfix). This is what caused the
+        413 "request entity too large" errors — express.json()'s
+        default 100kb body limit, combined with base64 inflating raw
+        image bytes by ~33%, meant any real photo blew the limit. Kept
+        read-only for any pre-existing record that still has one set;
+        no code path writes to it anymore (see employee.service.js's
+        sanitizeInput, which now strips it from incoming payloads).
+        New/replaced photos use photoUrl/photoFileId below instead. */
     photoDataUri: { type: String, default: null },
+    /** Google Drive webViewLink for this employee's photo (private —
+        requires the connected Google account to view, same as salary
+        slip shareUrl). Set by the dedicated photo upload endpoint
+        only (controllers/employee.controller.js's uploadPhoto), never
+        by the general create/update payload. */
+    photoUrl: { type: String, default: null },
+    /** Drive file id backing photoUrl — needed to delete/replace the
+        old file when a new photo is uploaded (see
+        services/storage/googleDriveProvider.js's uploadEmployeePhoto,
+        a separate "Employee Photos" folder from the salary-slip
+        "Arna Intelligence IntelliPayRoll" tree; that folder and its
+        upload/delete logic are untouched by this). */
+    photoFileId: { type: String, default: null },
     uan: { type: String, trim: true, default: '' },
     manager: { type: String, trim: true, default: '' },
     emergencyContact: { type: String, trim: true, default: '' },

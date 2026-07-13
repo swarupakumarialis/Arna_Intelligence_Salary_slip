@@ -35,6 +35,14 @@ export async function getStorageStats() {
   return activeProvider.getStorageStats();
 }
 
+/** Employee profile pictures (Production Hotfix) — a separate Drive
+    folder from the salary-slip archive, uploaded/deleted through this
+    same facade so a future storage-provider swap covers photos too
+    with no change to employee.controller.js. */
+export async function uploadEmployeePhoto({ buffer, employeeId, mimeType }) {
+  return activeProvider.uploadEmployeePhoto({ buffer, employeeId, mimeType });
+}
+
 export async function upload({ buffer, fileName, year, month }) {
   return activeProvider.uploadFile({ buffer, fileName, year, month });
 }
