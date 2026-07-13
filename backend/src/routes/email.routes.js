@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import * as emailController from '../controllers/email.controller.js';
+import * as networkDiagnosticController from '../controllers/networkDiagnostic.controller.js';
 import { AppError } from '../utils/AppError.js';
 
 /* Memory storage, same reasoning as pdfStorage.routes.js — the
@@ -29,5 +30,10 @@ function handleUpload(req, res, next) {
 const router = Router();
 
 router.post('/send', handleUpload, emailController.sendEmail);
+
+// TEMPORARY (Sprint 6.2F) — remove this route once the Render SMTP
+// ETIMEDOUT investigation is closed. See
+// controllers/networkDiagnostic.controller.js for why this exists.
+router.get('/network-test', networkDiagnosticController.networkTest);
 
 export default router;
