@@ -1,5 +1,6 @@
 import * as employeeService from '../services/employee.service.js';
 import * as storageService from '../services/storage/storageService.js';
+import { generateThumbnailDataUri } from '../services/thumbnail.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 
@@ -43,17 +44,26 @@ export const deleteEmployee = asyncHandler(async (req, res) => {
 });
 
 /**
- * Employee profile picture upload (Production Hotfix). Replaces the
- * old flow where the whole image was base64-encoded and embedded in
- * the plain JSON create/update body — that's what produced 413
- * "request entity too large" (express.json()'s default 100kb limit,
- * blown past by any real photo once base64-inflated). This endpoint
- * is multipart (see routes/employee.routes.js's multer wiring):
- * the raw image bytes go straight to Google Drive, and only a URL +
- * file id ever get written to MongoDB. Does not touch the salary-slip
- * Drive folder/logic at all — see storage/googleDriveProvider.js's
- * uploadEmployeePhoto, which uses its own separate "Employee Photos"
- * folder.
+ * Employee profile picture upload (Production Hotfix; architecture
+ * finalized Sprint 6.2D). Multipart (see routes/employee.routes.js's
+ * multer wiring) — the raw image bytes go to Google Drive as the
+ * permanent original archive (photoFileId/photoUrl), exactly as
+ * before, using storage/googleDriveProvider.js's uploadEmployeePhoto
+ * and its own separate "Employee Photos" folder (salary-slip Drive
+ * logic untouched).
+ *
+ * Sprint 6.2D: rendering a Drive URL directly in <img> proved
+ * unreliable across three attempts (webViewLink, then two different
+ * hand-built/officially-sourced direct-content URLs — redirects,
+ * permission edge cases, browser differences). The UI now never
+ * touches Drive for display at all: a small compressed thumbnail
+ * (~150x150 JPEG, generated from the exact same buffer already in
+ * memory for the Drive upload — no extra download) is stored directly
+ * in Mongo as photoDataUri and is the only thing any component
+ * renders. Thumbnail generation is best-effort: if it fails for some
+ * reason, the Drive upload (the real archive) has still succeeded,
+ * so that failure doesn't roll back the upload — it just means this
+ * employee falls back to initials until a future upload succeeds.
  */
 export const uploadPhoto = asyncHandler(async (req, res) => {
   if (!req.file) throw new AppError('No image file was uploaded', 400);
@@ -65,11 +75,18 @@ export const uploadPhoto = asyncHandler(async (req, res) => {
     mimeType: req.file.mimetype,
   });
 
+  let photoDataUri = null;
+  try {
+    photoDataUri = await generateThumbnailDataUri(req.file.buffer);
+  } catch (err) {
+    console.warn('[employeePhoto] Thumbnail generation failed — original is still archived in Drive:', err.message);
+  }
+
   const previousPhotoFileId = employee.photoFileId;
   const updated = await employeeService.updateEmployee(req.params.id, {
     photoUrl: url,
     photoFileId: fileId,
-    photoDataUri: null, // clears any legacy base64 photo once a real upload replaces it
+    photoDataUri,
   });
 
   // Best-effort: the new photo is already saved and linked above: an

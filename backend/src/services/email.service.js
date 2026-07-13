@@ -26,40 +26,72 @@ const PDF_MAGIC_BYTES = '%PDF-';
 
 let cachedTransporter = null;
 
+/** Never logs the real address — just enough to confirm in Render's
+    logs that EMAIL_USER is actually set and roughly what it is
+    ("sw***@gmail.com"), without putting a real mailbox address in
+    plaintext logs. */
+function maskEmail(email) {
+  if (!email) return '(not set)';
+  const [local, domain] = String(email).split('@');
+  if (!domain) return '***';
+  const visible = local.slice(0, 2);
+  return `${visible}${'*'.repeat(Math.max(local.length - 2, 1))}@${domain}`;
+}
+
 /** Lazily built so a missing/blank EMAIL_USER/EMAIL_PASS doesn't break
     server startup — it only surfaces as a send failure, caught and
     logged the same as any other SMTP error.
  *
- * Root cause of the production "Connection timeout" (investigated —
- * see Sprint report): this previously used Nodemailer's `service:
- * 'gmail'` shorthand with no explicit network options. On Render
- * (and most container-based hosts), Node's default DNS resolution
- * order tries the SMTP host's IPv6 address first; Render's outbound
- * networking does not reliably route that IPv6 connection to Gmail,
- * so the TCP handshake hangs until Nodemailer's default connection
- * timeout (2 minutes) elapses — surfacing as exactly "Connection
- * timeout", even though credentials, the attachment, and everything
- * else about the send were correct. This never reproduced locally
- * because most local/dev networks either lack IPv6 entirely or have
- * it fully routed, so the first (IPv6) attempt just works there.
+ * Investigated for the production hotfix ("localhost sends, Render
+ * times out, despite Drive/Mongo/PDF/attachment all succeeding" —
+ * i.e. the failure is specifically at the SMTP connection stage).
+ * There is exactly one transporter defined anywhere in this backend
+ * (this function) — no duplicate/stale config elsewhere that could
+ * explain the deployed process using something different from what's
+ * below; the log line this function prints on first use is the
+ * ground truth for whatever is actually running.
  *
- * Fix: force IPv4 (`family: 4`) so the client never attempts the
- * unreliable IPv6 path, and set explicit (shorter) timeouts so any
- * genuine connectivity problem fails fast with a clear error instead
- * of hanging for the full default duration. `host`/`port`/`secure`
- * are now explicit rather than relying on the `service: 'gmail'`
- * shorthand's internal mapping — same endpoint, easier to reason
- * about and to change if Gmail is ever swapped for another provider. */
+ * The prior fix forced IPv4 (`family: 4`) on the theory that Render's
+ * outbound networking couldn't route Gmail's IPv6 address — that
+ * remains in place below (it's still correct and harmless either
+ * way), but port 465 (implicit TLS) continuing to time out even with
+ * IPv6 ruled out points at the port itself, not the IP family: 465
+ * requires the TLS handshake to begin immediately on connect, and
+ * several PaaS/container network layers (Render's outbound proxy
+ * among them, by report) are known to stall or drop that specific
+ * handshake pattern while still allowing a plain TCP connect followed
+ * by an explicit STARTTLS upgrade on port 587 through cleanly. Gmail
+ * supports both on smtp.gmail.com; 587 + STARTTLS is Google's own
+ * documented "if 465 doesn't work in your environment" fallback.
+ * `requireTLS: true` keeps this from ever silently sending over an
+ * unencrypted connection if the STARTTLS upgrade fails — the send
+ * fails loudly instead. */
 function getTransporter() {
   if (!cachedTransporter) {
-    cachedTransporter = nodemailer.createTransport({
+    const config = {
       host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      family: 4, // force IPv4 — see root-cause note above
+      port: 587,
+      secure: false, // STARTTLS on 587, not implicit TLS — see comment above
+      requireTLS: true,
+      family: 4, // force IPv4 — see comment above
       connectionTimeout: 15000,
       greetingTimeout: 15000,
       socketTimeout: 20000,
+    };
+    console.log('[email] Creating SMTP transporter:', {
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      requireTLS: config.requireTLS,
+      family: config.family,
+      connectionTimeout: config.connectionTimeout,
+      greetingTimeout: config.greetingTimeout,
+      socketTimeout: config.socketTimeout,
+      service: 'gmail (explicit host, not the "service: gmail" shorthand)',
+      EMAIL_USER: maskEmail(process.env.EMAIL_USER),
+    });
+    cachedTransporter = nodemailer.createTransport({
+      ...config,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -67,6 +99,29 @@ function getTransporter() {
     });
   }
   return cachedTransporter;
+}
+
+/** Connection-only health check (Production Hotfix) — verifies the
+    SMTP handshake (DNS + TCP connect + STARTTLS + auth) independent
+    of sending an actual message, so a boot-time log can say
+    definitively "SMTP reachable" or show the exact failing stage
+    (err.code) without waiting for a real "Email Employee" click.
+    Called once from server.js on startup; safe to call again anytime
+    (e.g. from a future health-check route) since it reuses the same
+    cached transporter. */
+export async function verifyEmailTransporter() {
+  try {
+    await getTransporter().verify();
+    console.log('[email] SMTP connection verified OK.');
+    return true;
+  } catch (err) {
+    console.error('[email] SMTP verification FAILED:', {
+      code: err.code,
+      command: err.command,
+      message: err.message,
+    });
+    return false;
+  }
 }
 
 function buildSubject({ month, year }) {

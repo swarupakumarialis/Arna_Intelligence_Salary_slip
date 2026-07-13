@@ -114,7 +114,7 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
     // Only need a server round-trip if there's a persisted photo to
     // actually delete from Drive — a still-staged, never-saved photo
     // just disappears locally.
-    if (editing.photoUrl) setRemovePhotoRequested(true);
+    if (editing.photoDataUri) setRemovePhotoRequested(true);
   };
 
   const handleSave = async () => {
@@ -153,7 +153,7 @@ export function EmployeeFormModal({ isOpen, onClose, employee, isExisting, onSav
     }
   };
 
-  const displayedPhotoUrl = photoPreviewUrl || (removePhotoRequested ? null : editing.photoUrl);
+  const displayedPhotoUrl = photoPreviewUrl || (removePhotoRequested ? null : editing.photoDataUri);
 
   return createPortal(
     <div

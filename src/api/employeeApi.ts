@@ -38,12 +38,16 @@ interface EmployeeApiRecord {
   PAN?: string;
   Aadhaar?: string;
   salaryDetails?: string;
-  /** Legacy base64 photo — see models/Employee.js. Only ever read now
-      (as a display fallback), never written by this file's payload. */
+  /** Small compressed thumbnail (Sprint 6.2D) — the only photo field
+      the frontend ever renders. Set by uploadEmployeePhoto's backend
+      endpoint (or the one-off migration script for pre-6.2D
+      records), never by createEmployee/updateEmployee's JSON body. */
   photoDataUri?: string | null;
-  /** Google Drive URL for an uploaded photo (Production Hotfix) — set
-      only by uploadEmployeePhoto below, via a dedicated multipart
-      endpoint, never by createEmployee/updateEmployee's JSON body. */
+  /** Google Drive URL for the archived original (Sprint 6.2D) —
+      backend/archive concern only. Deliberately NOT read by
+      fromApiRecord below: rendering a Drive URL directly proved
+      unreliable, so the frontend Employee type doesn't carry this at
+      all. Kept here only because the wire record includes it. */
   photoUrl?: string | null;
   uan?: string;
   manager?: string;
@@ -98,10 +102,11 @@ function fromApiRecord(record: EmployeeApiRecord): Employee {
     department: record.department || '',
     designation: record.designation || '',
     employmentType: (record.employmentType || undefined) as Employee['employmentType'],
-    // photoUrl wins when set (Drive-backed upload); falls back to the
-    // legacy base64 field for any record that hasn't been re-uploaded
-    // since the Production Hotfix — either way it's just an <img src>.
-    photoUrl: record.photoUrl || record.photoDataUri || null,
+    // Sprint 6.2D: never read record.photoUrl here — that's a Google
+    // Drive link, and rendering Drive URLs directly proved unreliable.
+    // photoDataUri is the compressed thumbnail Mongo actually stores
+    // for display; it's what every component renders.
+    photoDataUri: record.photoDataUri || null,
     salaryStructureNote: record.salaryDetails || '',
     pan: record.PAN || '',
     aadhaar: record.Aadhaar || '',

@@ -35,7 +35,7 @@ export function EmployeeViewModal({ employee, onClose, onEdit }: Props) {
         onClick={e => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <EmployeeAvatar name={employee.name} photoUrl={employee.photoUrl} size={44} />
+          <EmployeeAvatar name={employee.name} photoDataUri={employee.photoDataUri} size={44} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--clr-text)' }}>{employee.name}</div>
             <div style={{ fontSize: 11.5, color: 'var(--clr-text-muted)', fontFamily: 'monospace' }}>{employee.employeeId}</div>

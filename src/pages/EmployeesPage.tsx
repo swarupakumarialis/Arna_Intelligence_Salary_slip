@@ -38,7 +38,7 @@ function emptyEmployee(): Employee {
     department: '',
     designation: '',
     employmentType: undefined,
-    photoUrl: null,
+    photoDataUri: null,
     salaryStructureNote: '',
     pan: '',
     aadhaar: '',
@@ -200,7 +200,7 @@ export function EmployeesPage({
                 onClick={() => setViewing(emp)}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <EmployeeAvatar name={emp.name} photoUrl={emp.photoUrl} size={44} />
+                  <EmployeeAvatar name={emp.name} photoDataUri={emp.photoDataUri} size={44} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--clr-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.name}</div>
                     <div style={{ fontSize: 10.5, color: 'var(--clr-text-muted)', fontFamily: 'monospace' }}>{emp.employeeId}</div>

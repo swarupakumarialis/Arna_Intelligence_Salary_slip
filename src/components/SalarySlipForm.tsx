@@ -531,7 +531,7 @@ export function SalarySlipForm({ data, onChange, errors = {}, touched = {}, onBl
               background: 'linear-gradient(135deg, color-mix(in srgb, var(--arna-accent) 7%, white), white 65%)',
               boxShadow: 'var(--shadow-sm)',
             }}>
-              <EmployeeAvatar name={selectedEmployee.name} photoUrl={selectedEmployee.photoUrl} size={48} />
+              <EmployeeAvatar name={selectedEmployee.name} photoDataUri={selectedEmployee.photoDataUri} size={48} />
               {/* minWidth: 0 at every flex level below (this block, the
                   name row, and the name span itself) is what actually
                   lets long content truncate/wrap in place instead of

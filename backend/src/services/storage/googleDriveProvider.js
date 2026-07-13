@@ -208,6 +208,64 @@ async function resolvePhotoFolder(drive) {
   return photoFolderId;
 }
 
+/** Bug fix (broken employee photo images), part 2: even with a
+    working URL format, the file still 401s for any browser that
+    isn't authenticated as this app's connected Drive account —
+    confirmed live (a stored webViewLink returns 401/HTML when fetched
+    unauthenticated). Employee photos are meant to be visible to
+    whoever is using the Employee Directory in their own browser, not
+    just someone signed into this backend's Google account, so
+    (unlike uploadFile's salary slips, which must stay private — see
+    that function's comment, untouched here) photos need a "reader,
+    anyone with the link" grant to actually render. Checks existing
+    permissions first so re-running this (e.g. via the repair script)
+    doesn't pile up duplicate identical grants. */
+async function grantPublicReadAccess(drive, fileId) {
+  const { data } = await drive.permissions.list({ fileId, fields: 'permissions(id, type, role)' });
+  const alreadyPublic = (data.permissions || []).some((p) => p.type === 'anyone' && p.role === 'reader');
+  if (alreadyPublic) return;
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role: 'reader', type: 'anyone' },
+    fields: 'id',
+  });
+}
+
+/** Sprint 6.2C.3 — stop guessing URL formats entirely (two prior
+    attempts, lh3.googleusercontent.com/d/<id> and
+    drive.google.com/uc?export=view&id=<id>, were both hand-built and
+    both proved unreliable). Instead ask Drive itself what to use,
+    via the exact field set Google documents for this purpose:
+      - webViewLink     → Drive's HTML viewer page, not raw bytes. Out.
+      - thumbnailLink   → looked promising (renders fine) but Google
+                           documents it as short-lived, and it's
+                           confirmed to actually rotate: fetching the
+                           same file's metadata twice returns two
+                           different thumbnailLink tokens. Wrong choice
+                           for a URL persisted indefinitely in Mongo.
+      - webContentLink  → Google's documented download-content link.
+                           Confirmed stable across repeated fetches
+                           (byte-for-byte identical), and confirmed to
+                           serve the real image (200, image/jpeg or
+                           image/png) once the file is
+                           anyone-with-link-readable. This is what
+                           gets stored.
+    Called once right after upload (and by repairEmployeePhotoUrl
+    below for pre-existing records) — never hand-constructed. */
+async function fetchStableImageUrl(drive, fileId) {
+  const { data } = await drive.files.get({
+    fileId,
+    fields: 'id,name,mimeType,webViewLink,webContentLink,thumbnailLink,iconLink,imageMediaMetadata',
+  });
+  if (!data.webContentLink) {
+    // Documented fallback (no case observed yet where this triggers,
+    // but webContentLink's docs don't guarantee it's always present) —
+    // Drive's own officially documented download endpoint, not a guess.
+    return `https://drive.google.com/uc?id=${fileId}&export=download`;
+  }
+  return data.webContentLink;
+}
+
 export async function uploadEmployeePhoto({ buffer, employeeId, mimeType }) {
   const drive = await getDrive();
   const folderId = await resolvePhotoFolder(drive);
@@ -218,10 +276,24 @@ export async function uploadEmployeePhoto({ buffer, employeeId, mimeType }) {
   const { data } = await drive.files.create({
     requestBody: { name: fileName, parents: [folderId] },
     media: { mimeType, body: Readable.from(buffer) },
-    fields: 'id, webViewLink',
+    fields: 'id',
   });
 
-  return { fileId: data.id, url: data.webViewLink || null };
+  await grantPublicReadAccess(drive, data.id);
+  const url = await fetchStableImageUrl(drive, data.id);
+
+  return { fileId: data.id, url };
+}
+
+/** Repairs an existing photoFileId's URL/permissions in place — for
+    records uploaded before this fix. Does not re-upload or move
+    anything; same file, same folder, just the permission grant +
+    Drive-sourced URL this function was missing. Used by
+    scripts/repairEmployeePhotoUrls.js. */
+export async function repairEmployeePhotoUrl(fileId) {
+  const drive = await getDrive();
+  await grantPublicReadAccess(drive, fileId);
+  return fetchStableImageUrl(drive, fileId);
 }
 
 async function removeFile(fileId) {
@@ -238,6 +310,21 @@ export async function getFile(fileId) {
     fields: 'id, name, webViewLink, createdTime, size',
   });
   return data;
+}
+
+/** Downloads a file's actual bytes (Sprint 6.2D) — distinct from
+    getFile above, which only ever fetches metadata. Used solely by
+    the employee-photo thumbnail migration
+    (scripts/generateEmployeePhotoThumbnails.js) to read back an
+    already-archived original so a thumbnail can be generated from it;
+    never used in the salary-slip path. `alt: 'media'` is Drive API's
+    documented way to request content instead of metadata;
+    responseType 'arraybuffer' is required for binary (non-JSON)
+    content with the googleapis client. */
+export async function downloadFile(fileId) {
+  const drive = await getDrive();
+  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' });
+  return Buffer.from(res.data);
 }
 
 async function listChildren(drive, parentId, foldersOnly) {

@@ -112,13 +112,14 @@ export interface Employee {
   department: string;
   designation: string;
   employmentType?: EmploymentType;
-  /** Resolved display source for the employee's photo (Production
-      Hotfix) — a Google Drive URL for anything uploaded via the
-      dedicated photo endpoint, or a legacy base64 data URI for any
-      pre-existing record that hasn't been re-uploaded yet (see
-      api/employeeApi.ts's fromApiRecord). Either way it's a plain
-      <img src> value; callers don't need to care which. */
-  photoUrl?: string | null;
+  /** Small (~150x150, <20KB) compressed thumbnail, stored directly in
+      MongoDB (Sprint 6.2D). This is the ONLY thing ever rendered for
+      an employee's photo — the original lives in Google Drive
+      (backend-only, see Employee.photoFileId) purely as an archive.
+      Rendering a Drive URL directly proved unreliable across three
+      attempts (redirects, permissions, browser differences), so the
+      UI never touches Drive for display at all. */
+  photoDataUri?: string | null;
   /** Free-text HR note on pay structure (e.g. "CTC 6L, Basic 40%, HRA 20%") — not a computed field. */
   salaryStructureNote?: string;
   pan?: string;

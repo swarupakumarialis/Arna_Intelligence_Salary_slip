@@ -43,6 +43,13 @@ export async function uploadEmployeePhoto({ buffer, employeeId, mimeType }) {
   return activeProvider.uploadEmployeePhoto({ buffer, employeeId, mimeType });
 }
 
+/** Bug fix (broken employee photo images) — repairs a photo uploaded
+    before the URL-format/permissions fix. See googleDriveProvider.js's
+    repairEmployeePhotoUrl for what this actually changes. */
+export async function repairEmployeePhotoUrl(fileId) {
+  return activeProvider.repairEmployeePhotoUrl(fileId);
+}
+
 export async function upload({ buffer, fileName, year, month }) {
   return activeProvider.uploadFile({ buffer, fileName, year, month });
 }
@@ -53,4 +60,11 @@ export async function deleteFile(fileId) {
 
 export async function getFile(fileId) {
   return activeProvider.getFile(fileId);
+}
+
+/** Downloads a file's actual bytes (Sprint 6.2D — employee photo
+    thumbnail migration only). See googleDriveProvider.js's
+    downloadFile for details. */
+export async function downloadFile(fileId) {
+  return activeProvider.downloadFile(fileId);
 }
