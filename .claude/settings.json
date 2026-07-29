@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"frontend dev server: HTTP %{http_code}\\\\n\" \"http://localhost:3001/\")",
+      "Bash(curl -s -o /dev/null -w \"backend health: HTTP %{http_code}\\\\n\" \"http://localhost:5001/api/health\")",
+      "Bash(nohup npm run dev)",
+      "Bash(curl -s -o /dev/null -w \"frontend dev server: HTTP %{http_code}\\\\n\" \"http://localhost:3000/\")",
+      "Bash(curl -s -o /dev/null -w \"frontend dev server \\(3000 fallback failed, trying 5173\\): HTTP %{http_code}\\\\n\" \"http://localhost:5173/\")",
+      "Bash(node -e \"console.log\\(require\\('c:/Users/singh/Downloads/salary-slip-generator-master/salary-slip-generator-master/node_modules/typescript/package.json'\\).version\\)\")",
+      "Bash(curl -s \"http://localhost:3000/src/components/SalarySlipForm.tsx\" -o /dev/null -w \"SalarySlipForm transform: HTTP %{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:3000/src/App.tsx\" -o /dev/null -w \"App.tsx transform: HTTP %{http_code}\\\\n\")",
+      "Bash(curl -s -o /dev/null -w \"SalarySlipForm: %{http_code}\\\\n\" \"http://localhost:3000/src/components/SalarySlipForm.tsx\")",
+      "Bash(curl -s -o /dev/null -w \"SalarySlipPreview: %{http_code}\\\\n\" \"http://localhost:3000/src/components/SalarySlipPreview.tsx\")",
+      "Bash(curl -s -o /dev/null -w \"App.tsx: %{http_code}\\\\n\" \"http://localhost:3000/src/App.tsx\")",
+      "Bash(node --check src/models/InvoiceCounter.js)",
+      "Bash(node --check src/models/Invoice.js)",
+      "Bash(node --check src/services/invoice.service.js)",
+      "Bash(node --check src/controllers/invoice.controller.js)",
+      "Bash(node --check src/routes/invoice.routes.js)",
+      "Bash(curl -s -m 3 http://localhost:5001/api/health)",
+      "Bash(curl -s -m 3 http://localhost:5001/api/invoices)",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s http://localhost:5001/api/invoices/6a6a30cdf7da1fee44252616)",
+      "Bash(curl -s -X PUT http://localhost:5001/api/invoices/6a6a30cdf7da1fee44252616 -H 'Content-Type: application/json' -d '{\"status\":\"Sent\",\"invoiceNumber\":\"HACKED-0000\"}')",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices -H \"Content-Type: application/json\" -d '{\"customer\":\"Second Customer\",\"items\":[],\"grandTotal\":500}')",
+      "Bash(curl -s \"http://localhost:5001/api/invoices?q=Second\")",
+      "Bash(curl -s -X DELETE http://localhost:5001/api/invoices/6a6a30cdf7da1fee44252616)",
+      "Bash(curl -s -X DELETE http://localhost:5001/api/invoices/6a6a30d7f7da1fee44252623)",
+      "Bash(curl -s -m 3 http://localhost:5173/ -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s -m 5 http://localhost:5173/ -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s -m 5 http://localhost:3004/ -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s -m 5 \"http://localhost:3004/src/modules/finance/invoice-generator/InvoiceGeneratorPage.tsx\" -o /dev/null -w \"InvoiceGeneratorPage transform: %{http_code}\\\\n\")",
+      "Bash(curl -s -m 5 \"http://localhost:3004/src/modules/finance/invoice-history/InvoiceHistoryPage.tsx\" -o /dev/null -w \"InvoiceHistoryPage transform: %{http_code}\\\\n\")",
+      "Bash(npm ls *)",
+      "Bash(git status *)",
+      "Bash(echo \"exit:$?\")"
+    ]
+  }
+}

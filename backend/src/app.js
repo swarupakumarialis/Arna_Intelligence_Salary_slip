@@ -9,6 +9,7 @@ import salaryHistoryRoutes from './routes/salaryHistory.routes.js';
 import pdfStorageRoutes from './routes/pdfStorage.routes.js';
 import emailRoutes from './routes/email.routes.js';
 import googleDriveRoutes from './routes/googleDrive.routes.js';
+import invoiceRoutes from './routes/invoice.routes.js';
 
 /**
  * Express app configuration — separated from server.js (which owns
@@ -53,6 +54,9 @@ app.use('/api/salary-history', salaryHistoryRoutes);
 app.use('/api/pdf', pdfStorageRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/integrations/google-drive', googleDriveRoutes);
+/* Sprint 4 — Invoice module (Finance section). A completely independent
+   collection/route from Employee/SalaryHistory; see models/Invoice.js. */
+app.use('/api/invoices', invoiceRoutes);
 
 // Future feature routers (auth, …) mount here, above notFound/errorHandler.
 

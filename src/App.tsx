@@ -27,6 +27,7 @@ import { EmailSalaryModal } from './components/share/EmailSalaryModal';
 import { buildEmailSubject, buildEmailBody } from './components/share/EmailTemplate';
 import { PreviewToolbar } from './components/preview/PreviewToolbar';
 import { CurrencyProvider, CurrencyCode } from './contexts/CurrencyContext';
+import type { InvoiceOpenRequest } from './modules/finance/invoice-generator/InvoiceGeneratorPage';
 
 /* Lazy-loaded — these are the pages a user visits after the Salary
    Generator, not on first load, so they're split into separate chunks
@@ -40,6 +41,12 @@ const CompanySettingsPage = lazy(() => import('./pages/CompanySettingsPage').the
 const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
 const DocumentsPage = lazy(() => import('./pages/DocumentsPage').then(m => ({ default: m.DocumentsPage })));
 const TaxCenterPage = lazy(() => import('./pages/TaxCenterPage').then(m => ({ default: m.TaxCenterPage })));
+// Finance module (Sprint 1) — lives under modules/finance/, not
+// pages/, since it's an independent, self-contained feature area (see
+// src/modules/finance/README-equivalent comments in its index.ts
+// placeholders) rather than another Payroll destination.
+const InvoiceGeneratorPage = lazy(() => import('./modules/finance/invoice-generator/InvoiceGeneratorPage').then(m => ({ default: m.InvoiceGeneratorPage })));
+const InvoiceHistoryPage = lazy(() => import('./modules/finance/invoice-history/InvoiceHistoryPage').then(m => ({ default: m.InvoiceHistoryPage })));
 
 function PageLoadingFallback() {
   return (
@@ -205,6 +212,13 @@ export default function App() {
      lands on today — so this navigation shell changes nothing about
      the app's starting workflow. */
   const [activePage, setActivePage] = useState<SidebarKey>('generator');
+  /* Sprint 4 — the one piece of Invoice-module state App.tsx lifts, so
+     Invoice History can tell the Invoice Generator "open invoice X in
+     edit/view mode" despite there being no URL router to carry that as
+     a param. Everything else about the Invoice module (its own data
+     fetching, form state, etc.) stays self-contained within
+     modules/finance/ — this is not a payroll/SalaryData concern. */
+  const [invoiceOpenRequest, setInvoiceOpenRequest] = useState<InvoiceOpenRequest | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   /* Points at the dedicated SalarySlipPDF instance (rendered off-screen,
      always mounted — see the JSX below) rather than the on-screen
@@ -424,7 +438,17 @@ export default function App() {
      page like every other sidebar destination (it used to special-case
      into opening the EmployeeMaster modal instead). */
   const handleNavigate = useCallback((key: SidebarKey) => {
+    /* Clicking "Invoice Generator" in the sidebar directly (as opposed
+       to arriving via Invoice History's View/Edit) always means "start
+       a new invoice" — clear any pending open request so the Generator
+       doesn't stay stuck showing whatever was last opened. */
+    if (key === 'invoice-generator') setInvoiceOpenRequest(null);
     setActivePage(key);
+  }, []);
+
+  const openInvoice = useCallback((id: string, mode: 'edit' | 'view') => {
+    setInvoiceOpenRequest({ id, mode });
+    setActivePage('invoice-generator');
   }, []);
 
   /* Loss of Pay — automatically maintained as a deduction row keyed by
@@ -1260,6 +1284,25 @@ export default function App() {
                   onBlurField={handleBlurField}
                   onSettingsChanged={handleSettingsChanged}
                 />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'invoice-generator' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <InvoiceGeneratorPage
+                  openRequest={invoiceOpenRequest}
+                  onOpenRequestHandled={() => setInvoiceOpenRequest(null)}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'invoice-history' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <InvoiceHistoryPage onOpenInvoice={openInvoice} />
               </Suspense>
             </div>
           )}
