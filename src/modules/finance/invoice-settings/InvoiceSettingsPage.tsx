@@ -4,7 +4,7 @@ import { PageHeader } from '../../../components/ui/PageHeader';
 import { Breadcrumb } from '../../../components/ui/Breadcrumb';
 import { Card } from '../../../components/ui/Card';
 import { CURRENCY_CODES, CURRENCY_META } from '../../../utils/currencyService';
-import { loadCompanySettings } from '../../../utils/companySettingsStore';
+import { BrandConfig, loadCompanySettings, saveCompanySettings } from '../../../utils/companySettingsStore';
 import {
   InvoiceSettings, loadInvoiceSettings, saveInvoiceSettings, sanitizeInvoicePrefix, validateSettingsImageFile,
 } from '../utils/invoiceSettingsStore';
@@ -20,6 +20,15 @@ function Field({ label, hint, ...props }: { label: string; hint?: string } & Rea
       <label style={labelStyle}>{label}</label>
       <input {...props} className="field" />
       {hint && <p style={{ fontSize: 10.5, color: 'var(--clr-text-subtle)', margin: '4px 0 0' }}>{hint}</p>}
+    </div>
+  );
+}
+
+function TextAreaFieldSmall({ label, ...props }: { label: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <textarea {...props} className="field" style={{ resize: 'vertical', minHeight: 56, fontFamily: 'inherit' }} />
     </div>
   );
 }
@@ -92,23 +101,30 @@ function ImageUpload({ label, imageUri, onChange, onError }: ImageUploadProps) {
   );
 }
 
-/** Finance module — Invoice Settings (Sprint 7). A dedicated,
+/** Finance module — Invoice Settings (Sprint 7, updated). A dedicated,
     localStorage-backed settings store separate from Company Settings'
-    BrandConfig (see invoiceSettingsStore.ts) — Part 2's "avoid
-    duplicate company information... Invoice-specific settings should
-    remain separate": company identity (logo/name/address/GST/phone/
-    email) is shown below read-only, sourced from BrandConfig, with no
-    editable copy here; everything editable on this page (numbering,
-    tax/currency defaults, payment/signature details, default notes/
-    terms) is Invoice-only and has never existed anywhere else. */
+    BrandConfig (see invoiceSettingsStore.ts) for everything that's
+    genuinely Invoice-only (numbering, tax/currency defaults, payment/
+    signature details, default notes/terms).
+    Company identity (logo/name/address/GST/phone/email) is still
+    BrandConfig — the same single source of truth Company Settings and
+    the Salary PDF read — but is now editable from here too, saved via
+    the same saveCompanySettings() Company Settings itself uses. The
+    default value stays whatever DEFAULT_BRAND ships with ("Arnas
+    Learning Intelligence Studio Pvt. Ltd."), but any deployment can
+    rename it here for their own company without touching code —
+    that's the whole point of this being editable rather than
+    read-only: a different company can white-label the app to their
+    own identity from this one screen. */
 export function InvoiceSettingsPage() {
   const [settings, setSettings] = useState<InvoiceSettings>(loadInvoiceSettings);
+  const [brand, setBrand] = useState<BrandConfig>(loadCompanySettings);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<'success' | 'error'>('success');
-  const brand = loadCompanySettings();
 
   const patch = (p: Partial<InvoiceSettings>) => setSettings(prev => ({ ...prev, ...p }));
+  const patchBrand = (p: Partial<BrandConfig>) => setBrand(prev => ({ ...prev, ...p }));
 
   const showNotice = (message: string, tone: 'success' | 'error' = 'success') => {
     setNotice(message);
@@ -122,6 +138,7 @@ export function InvoiceSettingsPage() {
       const sanitized: InvoiceSettings = { ...settings, invoicePrefix: sanitizeInvoicePrefix(settings.invoicePrefix) };
       saveInvoiceSettings(sanitized);
       setSettings(sanitized);
+      saveCompanySettings(brand);
       showNotice('Invoice settings saved. New invoices will use these defaults.');
     } catch {
       showNotice('Failed to save invoice settings. Please try again.', 'error');
@@ -152,18 +169,30 @@ export function InvoiceSettingsPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 860 }}>
         <Card title="Company Identity" icon={<Building2 size={13} />}>
           <p style={{ fontSize: 11.5, color: 'var(--clr-text-subtle)', margin: '0 0 14px' }}>
-            Read-only — shown on every invoice, managed from Company Settings so it stays consistent across Payroll and Invoices.
+            Shown on every invoice (and the Salary payslip) — shared with Company Settings, so editing it here updates it there too.
+            Defaults to {`"Arnas Learning Intelligence Studio Pvt. Ltd."`}; rename it for your own company at any time.
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {brand.logoDataUri && <img src={brand.logoDataUri} alt={brand.companyName} style={{ height: 40, width: 'auto', objectFit: 'contain' }} />}
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--clr-text)', margin: 0 }}>{brand.companyName || 'Company name not set'}</p>
-              <p style={{ fontSize: 11, color: 'var(--clr-text-muted)', margin: '2px 0 0', whiteSpace: 'pre-line' }}>{brand.companyAddress}</p>
-              <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '4px 0 0' }}>
-                {[brand.gstin && `GSTIN: ${brand.gstin}`, brand.phone, brand.email].filter(Boolean).join('  ·  ') || 'No GST/phone/email on file'}
-              </p>
-            </div>
+          <ImageUpload
+            label="Company Logo" imageUri={brand.logoDataUri}
+            onChange={dataUri => patchBrand({ logoDataUri: dataUri })}
+            onError={message => showNotice(message, 'error')}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginTop: 16 }}>
+            <Field label="Company Name" value={brand.companyName} onChange={e => patchBrand({ companyName: e.target.value })} placeholder="Your Company Pvt. Ltd." />
+            <Field label="GSTIN" value={brand.gstin || ''} onChange={e => patchBrand({ gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
+            <Field label="Phone" value={brand.phone || ''} onChange={e => patchBrand({ phone: e.target.value })} placeholder="+91 98765 43210" />
+            <Field label="Email" type="email" value={brand.email || ''} onChange={e => patchBrand({ email: e.target.value })} placeholder="billing@company.com" />
           </div>
+          <div style={{ marginTop: 14 }}>
+            <TextAreaFieldSmall label="Company Address" value={brand.companyAddress} onChange={e => patchBrand({ companyAddress: e.target.value })} placeholder="Street, City, State - PIN" />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 12, fontWeight: 500, color: 'var(--clr-text)', cursor: 'pointer' }}>
+            <input
+              type="checkbox" checked={settings.showWatermark}
+              onChange={e => patch({ showWatermark: e.target.checked })}
+            />
+            Show company name as a background watermark on invoices
+          </label>
         </Card>
 
         <Card title="Numbering & Defaults" icon={<FileText size={13} />}>

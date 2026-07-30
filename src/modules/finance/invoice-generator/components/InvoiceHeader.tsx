@@ -39,8 +39,8 @@ export function InvoiceHeader({ companyName, companyAddress, logoDataUri, accent
             {companyName}
           </p>
           {companyAddress && (
-            <p style={{ fontSize: 10.5, color: '#64748B', margin: '5px 0 0', whiteSpace: 'pre-line', lineHeight: 1.6, maxWidth: 280 }}>
-              {companyAddress}
+            <p style={{ fontSize: 10.5, color: '#64748B', margin: '5px 0 0', lineHeight: 1.5, maxWidth: 300 }}>
+              {companyAddress.split(/\n+/).map(s => s.trim()).filter(Boolean).join(', ')}
             </p>
           )}
         </div>

@@ -611,14 +611,21 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
     }
   };
 
+  /** Download/Print/Open PDF are read-only actions that only need the
+      off-screen InvoicePdf render (always mounted, see below) — they
+      never required a saved record, so they no longer gate on
+      invoiceNumber like Email/Open-in-Drive genuinely must (those two
+      call backend endpoints tied to an existing invoice id). A draft
+      that hasn't been saved yet gets a "Invoice-Draft" fallback
+      filename instead of blocking the action outright — this is the
+      fix for "download not working" on an unsaved invoice. */
+  const draftFileLabel = () => invoiceNumber ?? 'Invoice-Draft';
+
   const handleDownload = async () => {
-    if (!pdfRef.current || !invoiceNumber) {
-      showNotice('Save the invoice before downloading.');
-      return;
-    }
+    if (!pdfRef.current) return;
     setDownloading(true);
     try {
-      const { pdf, fileName } = await generateInvoicePdf(pdfRef.current, invoiceNumber);
+      const { pdf, fileName } = await generateInvoicePdf(pdfRef.current, draftFileLabel());
       pdf.save(fileName);
     } catch (err) {
       console.error('[invoice] PDF download failed:', err);
@@ -634,10 +641,6 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
       DOM, not a rasterized image, so this is higher print quality than
       the Download PDF path for content that spans multiple pages. */
   const handlePrint = () => {
-    if (!invoiceNumber) {
-      showNotice('Save the invoice before printing.');
-      return;
-    }
     const cleanup = () => {
       document.body.classList.remove('invoice-printing');
       window.removeEventListener('afterprint', cleanup);
@@ -648,13 +651,10 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
   };
 
   const handleOpenPdf = async () => {
-    if (!pdfRef.current || !invoiceNumber) {
-      showNotice('Save the invoice before opening the PDF.');
-      return;
-    }
+    if (!pdfRef.current) return;
     setOpeningPdf(true);
     try {
-      const { blob } = await generateInvoicePdf(pdfRef.current, invoiceNumber);
+      const { blob } = await generateInvoicePdf(pdfRef.current, draftFileLabel());
       window.open(URL.createObjectURL(blob), '_blank', 'noopener');
     } catch (err) {
       console.error('[invoice] PDF open failed:', err);
@@ -1001,7 +1001,6 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
             onFitToScreen={handleFitToScreen}
             onPrint={handlePrint}
             onDownload={handleDownload}
-            actionsDisabled={!invoiceNumber}
             downloading={downloading}
           />
 

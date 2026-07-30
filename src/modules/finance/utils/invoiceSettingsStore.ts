@@ -41,6 +41,13 @@ export interface InvoiceSettings {
   signatoryName: string;
   signatoryTitle: string;
   signatureImageUri: string | null;
+  /** Shows the company name as a large, faint, rotated background
+      watermark across the invoice — same visual treatment
+      PDFWatermark.tsx already uses for the Salary payslip
+      (showNameWatermark on BrandConfig), reimplemented independently
+      here rather than shared so Invoice's on/off toggle is its own
+      setting, not tied to the payslip's. */
+  showWatermark: boolean;
 }
 
 export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
@@ -60,6 +67,7 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   signatoryName: '',
   signatoryTitle: 'Authorized Signature',
   signatureImageUri: null,
+  showWatermark: false,
 };
 
 const STORAGE_KEY = 'arna_invoice_settings_v1';

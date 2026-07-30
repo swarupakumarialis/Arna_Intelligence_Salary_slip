@@ -8,6 +8,7 @@ import { InvoicePdfCustomer } from './InvoicePdfCustomer';
 import { InvoicePdfItems } from './InvoicePdfItems';
 import { InvoicePdfSummary } from './InvoicePdfSummary';
 import { InvoicePdfFooter } from './InvoicePdfFooter';
+import { InvoicePdfWatermark } from './InvoicePdfWatermark';
 
 interface Props {
   customer: CustomerDetails;
@@ -67,25 +68,28 @@ export function InvoicePdf({ customer, invoice, invoiceNumber, items, totals, no
         fontFamily: "'Inter', 'Segoe UI', system-ui, Arial, sans-serif",
         color: '#111827',
         backgroundColor: '#ffffff',
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
       }}
     >
-      <InvoicePdfHeader brand={brand} invoice={invoice} accentColor={accentColor} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, paddingBottom: 10, borderBottom: '1px solid #EEF1F5' }}>
-        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
-          <InvoicePdfCustomer customer={customer} accentColor={accentColor} />
+      <InvoicePdfWatermark show={settings.showWatermark} companyName={brand.companyName} primary={accentColor} />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+        <InvoicePdfHeader brand={brand} invoice={invoice} accentColor={accentColor} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, paddingBottom: 10, borderBottom: '1px solid #EEF1F5' }}>
+          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+            <InvoicePdfCustomer customer={customer} accentColor={accentColor} />
+          </div>
+          <div style={{ flex: '0 0 auto' }}>
+            <InvoicePdfMeta invoiceNumber={invoiceNumber} invoice={invoice} accentColor={accentColor} />
+          </div>
         </div>
-        <div style={{ flex: '0 0 auto' }}>
-          <InvoicePdfMeta invoiceNumber={invoiceNumber} invoice={invoice} accentColor={accentColor} />
+        <InvoicePdfItems items={items} currency={invoice.currency} accentColor={accentColor} />
+        <div style={{ flex: 1 }} />
+        <div id={KEEP_TOGETHER_ID} style={{ breakInside: 'avoid', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <InvoicePdfSummary totals={totals} currency={invoice.currency} accentColor={accentColor} />
+          <InvoicePdfFooter settings={settings} accentColor={accentColor} generatedDate={generatedDate} notes={notes} terms={terms} />
         </div>
-      </div>
-      <InvoicePdfItems items={items} currency={invoice.currency} accentColor={accentColor} />
-      <div style={{ flex: 1 }} />
-      <div id={KEEP_TOGETHER_ID} style={{ breakInside: 'avoid', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <InvoicePdfSummary totals={totals} currency={invoice.currency} accentColor={accentColor} />
-        <InvoicePdfFooter settings={settings} accentColor={accentColor} generatedDate={generatedDate} notes={notes} terms={terms} />
       </div>
     </div>
   );

@@ -126,9 +126,22 @@ export function loadCompanySettings(): BrandConfig {
   return DEFAULT_BRAND;
 }
 
+/** Fired synchronously after every saveCompanySettings() call, in the
+    same tab — `window`'s built-in `storage` event only fires for
+    *other* tabs, so a same-tab caller outside App.tsx (Invoice
+    Settings now edits Company Identity directly, see
+    modules/finance/invoice-settings/InvoiceSettingsPage.tsx) has no
+    other way to tell App.tsx's own long-lived `brand` state that
+    localStorage just changed underneath it. App.tsx listens for this
+    and re-reads via loadCompanySettings() to stay in sync — without
+    it, a name/logo/address change made from Invoice Settings would
+    only show up on the Salary Generator after a full page reload. */
+export const COMPANY_SETTINGS_UPDATED_EVENT = 'arna-company-settings-updated';
+
 export function saveCompanySettings(b: BrandConfig): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(b));
+    window.dispatchEvent(new Event(COMPANY_SETTINGS_UPDATED_EVENT));
   } catch {
     /* ignore */
   }

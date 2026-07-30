@@ -8,6 +8,7 @@ import { InvoiceCustomer } from './InvoiceCustomer';
 import { InvoiceItemsTable } from './InvoiceItemsTable';
 import { InvoiceSummary } from './InvoiceSummary';
 import { InvoiceFooter } from './InvoiceFooter';
+import { InvoiceWatermark } from './InvoiceWatermark';
 
 interface Props {
   customer: CustomerDetails;
@@ -50,9 +51,11 @@ export function InvoicePreview({ customer, invoice, invoiceNumber, items, totals
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
       }}
     >
-      <div style={{ height: 6, background: accentColor, flexShrink: 0 }} />
+      <InvoiceWatermark show={settings.showWatermark} companyName={brand.companyName} primary={accentColor} />
+      <div style={{ height: 6, background: accentColor, flexShrink: 0, position: 'relative', zIndex: 1 }} />
       <div style={{
         padding: '40px 52px 52px',
         fontFamily: "'Inter', 'Segoe UI', system-ui, Arial, sans-serif",
@@ -61,6 +64,8 @@ export function InvoicePreview({ customer, invoice, invoiceNumber, items, totals
         flexDirection: 'column',
         gap: 28,
         flex: 1,
+        position: 'relative',
+        zIndex: 1,
       }}>
         <InvoiceHeader
           companyName={brand.companyName || 'Company Name'}

@@ -13,7 +13,7 @@ import { defaultTaxConfigs } from './utils/taxCalculator';
 import { getEmployees, ApiError } from './api/employeeApi';
 import { calculateLop, LOP_DEDUCTION_ID } from './utils/payroll';
 import type { BrandConfig } from './utils/companySettingsStore';
-import { DEFAULT_BRAND, loadCompanySettings, saveCompanySettings } from './utils/companySettingsStore';
+import { DEFAULT_BRAND, loadCompanySettings, saveCompanySettings, COMPANY_SETTINGS_UPDATED_EVENT } from './utils/companySettingsStore';
 import { SalaryHistoryRecord } from './types';
 import { getSalaryHistory, createSalaryHistory, deleteSalaryHistory } from './api/salaryHistoryApi';
 import { uploadPdf, deletePdfArchive } from './api/pdfApi';
@@ -397,6 +397,18 @@ export default function App() {
   const handleResetBrand = () => setBrand(DEFAULT_BRAND);
 
   useEffect(() => { saveCompanySettings(brand); }, []);
+
+  /* Invoice Settings now edits Company Identity directly (writing
+     through saveCompanySettings, not through setBrand above), so this
+     app's own long-lived `brand` state needs to resync when that
+     happens elsewhere in the same tab — otherwise the Salary Generator
+     would keep showing the old name/logo/address until a full reload.
+     See companySettingsStore.ts's COMPANY_SETTINGS_UPDATED_EVENT. */
+  useEffect(() => {
+    const handler = () => setBrandState(loadCompanySettings());
+    window.addEventListener(COMPANY_SETTINGS_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(COMPANY_SETTINGS_UPDATED_EVENT, handler);
+  }, []);
 
   /* Propagate the brand colours onto the document root as live theme
      variables, so the whole app (buttons, focus rings, badges) — not
