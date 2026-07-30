@@ -27,6 +27,11 @@ const googleDriveConnectionSchema = new mongoose.Schema(
         that field and everything under it stays exclusively the
         salary-slip archive tree, untouched by this feature. */
     photoFolderId: { type: String, default: null },
+    /** Sprint 5 — cached id of the separate "Invoices" root folder,
+        same reasoning as photoFolderId above: its own top-level tree,
+        never nested under rootFolderId, so the Invoice PDF archive
+        stays completely independent of the salary-slip Drive tree. */
+    invoiceFolderId: { type: String, default: null },
     scopes: { type: [String], default: [] },
     connectedAt: { type: Date, default: Date.now },
     lastVerifiedAt: { type: Date, default: null },

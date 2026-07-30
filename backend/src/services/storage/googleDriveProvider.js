@@ -182,6 +182,43 @@ export async function uploadFile({ buffer, fileName, year, month }) {
   return { fileId: data.id, shareUrl: data.webViewLink || null };
 }
 
+const INVOICE_ROOT_FOLDER_NAME = 'Invoices';
+
+/** Resolves (creating as needed) "Invoices" / Year, caching the
+    invoice root folder id on the connection document — same pattern
+    as resolveMonthFolder above, but a completely separate top-level
+    tree (Sprint 5): this never reads or writes anything under
+    ROOT_FOLDER_NAME/rootFolderId, keeping the Invoice PDF archive
+    independent of the salary-slip Drive tree. */
+async function resolveInvoiceYearFolder(drive, year) {
+  const connection = await GoogleDriveConnection.findById(SINGLETON_ID);
+  let invoiceFolderId = connection?.invoiceFolderId || null;
+  if (!invoiceFolderId) {
+    invoiceFolderId = await findOrCreateFolder(drive, INVOICE_ROOT_FOLDER_NAME, null);
+    await GoogleDriveConnection.findByIdAndUpdate(SINGLETON_ID, { invoiceFolderId });
+  }
+  return findOrCreateFolder(drive, String(year), invoiceFolderId);
+}
+
+/** Same privacy invariant as uploadFile above: no
+    drive.permissions.create call, so the invoice PDF stays private to
+    the connected account, requiring the viewer be signed in as that
+    account to open webViewLink. */
+export async function uploadInvoiceFile({ buffer, fileName, year }) {
+  const drive = await getDrive();
+  const folderId = await resolveInvoiceYearFolder(drive, year);
+
+  const { data } = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType: 'application/pdf', body: Readable.from(buffer) },
+    fields: 'id, webViewLink',
+  });
+
+  await GoogleDriveConnection.findByIdAndUpdate(SINGLETON_ID, { lastVerifiedAt: new Date() });
+
+  return { fileId: data.id, shareUrl: data.webViewLink || null };
+}
+
 const PHOTO_ROOT_FOLDER_NAME = 'Employee Photos';
 const PHOTO_MIME_EXTENSIONS = {
   'image/jpeg': 'jpg',

@@ -44,8 +44,15 @@ interface InvoiceApiRecord {
   items: InvoiceItemApiRecord[];
   discount: number;
   notes: string;
+  termsAndConditions: string;
   createdAt?: string;
   updatedAt?: string;
+  driveFileId?: string | null;
+  driveFileUrl?: string | null;
+  pdfGeneratedAt?: string | null;
+  emailStatus?: 'Pending' | 'Sent' | 'Failed' | null;
+  emailSentAt?: string | null;
+  emailRecipient?: string | null;
 }
 
 export interface PaginatedInvoices {
@@ -103,8 +110,15 @@ function fromApiRecord(record: InvoiceApiRecord): Invoice {
     items: (record.items || []).map((item): InvoiceItem => ({ id: makeItemId(), ...item })),
     discount: record.discount,
     notes: record.notes,
+    termsAndConditions: record.termsAndConditions ?? '',
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    driveFileId: record.driveFileId,
+    driveFileUrl: record.driveFileUrl,
+    pdfGeneratedAt: record.pdfGeneratedAt,
+    emailStatus: record.emailStatus,
+    emailSentAt: record.emailSentAt,
+    emailRecipient: record.emailRecipient,
   };
 }
 
@@ -130,6 +144,7 @@ function toApiPayload(invoice: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt
     })),
     discount: invoice.discount,
     notes: invoice.notes,
+    termsAndConditions: invoice.termsAndConditions,
   };
 }
 
@@ -189,12 +204,19 @@ export async function getInvoice(id: string): Promise<Invoice> {
   return fromApiRecord(record);
 }
 
+/** `invoiceNumberPrefix` (Sprint 7, optional) — the Invoice Settings-
+    configured prefix (see modules/finance/utils/invoiceSettingsStore.ts),
+    honored only on create; the backend ignores it entirely on update
+    since invoiceNumber is assigned once and read-only thereafter. Not
+    part of the Invoice type itself — it's a numbering instruction, not
+    a field the invoice document stores on its own. */
 export async function createInvoice(
-  invoice: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt' | 'updatedAt'>
+  invoice: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt' | 'updatedAt'>,
+  invoiceNumberPrefix?: string
 ): Promise<Invoice> {
   const saved = await request<InvoiceApiRecord>('/invoices', {
     method: 'POST',
-    body: JSON.stringify(toApiPayload(invoice)),
+    body: JSON.stringify({ ...toApiPayload(invoice), invoiceNumberPrefix }),
   });
   return fromApiRecord(saved);
 }
@@ -212,4 +234,73 @@ export async function updateInvoice(
 
 export async function deleteInvoice(id: string): Promise<void> {
   await request<null>(`/invoices/${id}`, { method: 'DELETE' });
+}
+
+/** Sprint 5, Part 5 — uploads the exact PDF Blob the caller already
+    generated (see pdf/generateInvoicePdf.ts) to the backend's Invoices
+    Drive folder, and returns the invoice with driveFileId/driveFileUrl
+    populated. Deliberately a standalone fetch, not the shared
+    request() helper — a file upload is FormData, not JSON, same
+    reasoning as src/api/pdfApi.ts's uploadPdf(). */
+export async function uploadInvoicePdf(id: string, blob: Blob, fileName: string): Promise<Invoice> {
+  const formData = new FormData();
+  formData.append('pdf', blob, fileName);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/invoices/${id}/pdf`, { method: 'POST', body: formData });
+  } catch {
+    throw new ApiError('Unable to connect to server');
+  }
+  const record = await parseEnvelope<InvoiceApiRecord>(res);
+  return fromApiRecord(record);
+}
+
+export interface EmailInvoiceParams {
+  recipientEmail: string;
+  subject?: string;
+  companyName?: string;
+  pdfBlob: Blob;
+}
+
+/** Sprint 5, Part 6 — mirrors src/api/emailApi.ts's sendSalaryEmail:
+    sends the exact same in-memory PDF Blob already generated/uploaded,
+    as a multipart attachment, never a re-derived copy. */
+export async function emailInvoice(id: string, params: EmailInvoiceParams): Promise<Invoice> {
+  const formData = new FormData();
+  formData.append('pdf', params.pdfBlob, 'invoice.pdf');
+  formData.append('recipientEmail', params.recipientEmail);
+  if (params.subject) formData.append('subject', params.subject);
+  if (params.companyName) formData.append('companyName', params.companyName);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/invoices/${id}/email`, { method: 'POST', body: formData });
+  } catch {
+    throw new ApiError('Unable to connect to server');
+  }
+
+  let body: ApiEnvelope<InvoiceApiRecord> & { stage?: string | null } | null = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* Non-JSON response — fall through, handled by the !res.ok check below. */
+  }
+  if (!res.ok || !body?.success) {
+    throw new ApiError(body?.message || `Request failed (${res.status})`, res.status);
+  }
+  return fromApiRecord(body.data);
+}
+
+async function parseEnvelope<T>(res: Response): Promise<T> {
+  let body: ApiEnvelope<T> | null = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* Non-JSON response — fall through, handled by the !res.ok check below. */
+  }
+  if (!res.ok || !body?.success) {
+    throw new ApiError(body?.message || `Request failed (${res.status})`, res.status);
+  }
+  return body.data;
 }

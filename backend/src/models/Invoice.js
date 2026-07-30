@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const PAYMENT_TERMS = ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'];
-const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'];
+const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Partially Paid', 'Overdue', 'Cancelled'];
 
 /** Embedded, not a separate collection — a line item only ever exists
     as part of one invoice, same reasoning as SalaryHistory's
@@ -52,6 +52,27 @@ const invoiceSchema = new mongoose.Schema(
     roundOff: { type: Number, default: 0 },
     grandTotal: { type: Number, default: 0 },
     notes: { type: String, trim: true, default: '' },
+    /** Sprint 7 — snapshotted from Invoice Settings' default at create
+        time (frontend, see modules/finance/utils/invoiceSettingsStore.ts),
+        editable per-invoice thereafter, same as notes. Optional/additive
+        so pre-Sprint-7 invoices simply read as ''; the footer falls back
+        to the live Invoice Settings default when this is empty. */
+    termsAndConditions: { type: String, trim: true, default: '' },
+    /** Sprint 5 — Google Drive archive of this invoice's generated PDF.
+        Set by services/invoice.service.js's attachInvoicePdf(), which
+        uploads to a dedicated "Invoices" Drive folder tree (see
+        services/storage/googleDriveProvider.js) — entirely separate
+        from the salary-slip archive tree/collection (PdfArchive is not
+        reused here, per "keep the Invoice PDF completely independent"). */
+    driveFileId: { type: String, default: null },
+    driveFileUrl: { type: String, default: null },
+    pdfGeneratedAt: { type: Date, default: null },
+    /** Sprint 5 — current email-send state for this invoice, same flat-
+        field shape SalaryHistory already uses (emailStatus/emailSentAt/
+        emailRecipient) rather than a separate audit-log collection. */
+    emailStatus: { type: String, enum: ['Pending', 'Sent', 'Failed'], default: null },
+    emailSentAt: { type: Date, default: null },
+    emailRecipient: { type: String, trim: true, default: null },
   },
   { timestamps: true }
 );

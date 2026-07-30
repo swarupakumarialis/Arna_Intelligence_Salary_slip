@@ -1,18 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Trash2, Save, RotateCcw, FileCheck2, User, ClipboardList, ListChecks, Calculator, FileText, Pencil, Loader2,
+  Download, Printer, Mail, ExternalLink, Cloud,
 } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { Breadcrumb } from '../../../components/ui/Breadcrumb';
 import { Card } from '../../../components/ui/Card';
+import { StatusBadge, BadgeTone } from '../../../components/ui/StatusBadge';
 import { CURRENCY_CODES, CURRENCY_META, CurrencyCode, formatAmount } from '../../../utils/currencyService';
+import { loadCompanySettings } from '../../../utils/companySettingsStore';
+import { loadInvoiceSettings } from '../utils/invoiceSettingsStore';
 import {
   CustomerDetails, InvoiceDetails, InvoiceItem, InvoiceStatus, PAYMENT_TERMS, INVOICE_STATUSES,
 } from '../types';
 import { computeInvoiceTotals, createBlankInvoiceItem, todayIso } from '../utils';
-import { ApiError, createInvoice, getInvoice, updateInvoice } from '../services/invoiceApi';
+import { ApiError, createInvoice, emailInvoice, getInvoice, updateInvoice, uploadInvoicePdf } from '../services/invoiceApi';
 import { InvoicePreview } from './components/InvoicePreview';
 import { PreviewToolbar } from './components/PreviewToolbar';
+import { EmailInvoiceModal } from './components/EmailInvoiceModal';
+import { InvoicePdf } from './pdf/InvoicePdf';
+import { generateInvoicePdf } from './pdf/generateInvoicePdf';
 
 /** What Invoice History asks the Generator to open (Sprint 4). There is
     no URL router in this app (see App.tsx's SidebarKey/activePage
@@ -53,8 +60,12 @@ function emptyCustomerDetails(): CustomerDetails {
   return { customerName: '', companyName: '', email: '', phone: '', gstin: '', billingAddress: '' };
 }
 
+/** Sprint 7 — currency defaults from Invoice Settings rather than a
+    hardcoded 'INR', so a new invoice already reflects the configured
+    default (Part 1: "these settings should automatically populate new
+    invoices"). */
 function defaultInvoiceDetails(): InvoiceDetails {
-  return { invoiceDate: todayIso(), dueDate: '', paymentTerms: 'Due on Receipt', currency: 'INR', status: 'Draft' };
+  return { invoiceDate: todayIso(), dueDate: '', paymentTerms: 'Due on Receipt', currency: loadInvoiceSettings().defaultCurrency, status: 'Draft' };
 }
 
 const labelStyle: React.CSSProperties = {
@@ -62,34 +73,92 @@ const labelStyle: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5,
 };
 
-function Field({ label, hint, ...props }: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+/** Local, small-footprint counterpart to SalarySlipForm.tsx's own
+    FieldLabel/FieldError/error-styling convention (Sprint 6) — same
+    visual language (red asterisk, red border + soft glow, dotted red
+    error line) so Invoice forms feel consistent with the rest of the
+    app, reimplemented here rather than imported so the Invoice module
+    stays independent of Salary code. */
+function FieldError({ id, message }: { id?: string; message?: string }) {
+  if (!message) return null;
   return (
-    <div>
-      <label style={labelStyle}>{label}</label>
-      <input {...props} className="field" />
-      {hint && <p style={{ fontSize: 10.5, color: 'var(--clr-text-subtle)', margin: '4px 0 0' }}>{hint}</p>}
+    <div id={id} role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 4, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ width: 3, height: 3, borderRadius: '50%', background: '#DC2626', flexShrink: 0, display: 'inline-block' }} />
+      {message}
     </div>
   );
 }
+
+function errorFieldStyle(error?: string): React.CSSProperties | undefined {
+  return error ? { borderColor: '#FCA5A5', boxShadow: '0 0 0 3px rgba(220,38,38,0.10)' } : undefined;
+}
+
+interface FieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  hint?: string;
+  error?: string;
+  required?: boolean;
+}
+
+/** Declared as React.FC (not a plain function) — a plain
+    `function Field(...)` declaration with a props interface extending
+    React.InputHTMLAttributes tripped the same TS/JSX inference quirk
+    documented on ItemRow above (Sprint 2); React.FC sidesteps it here
+    too. */
+const Field: React.FC<FieldProps> = ({ label, hint, error, required, id, style, ...props }) => {
+  const errorId = error && id ? `${id}-error` : undefined;
+  return (
+    <div>
+      <label style={labelStyle} htmlFor={id}>
+        {label}{required && <span style={{ color: '#DC2626', marginLeft: 3 }} aria-hidden="true">*</span>}
+      </label>
+      <input
+        {...props}
+        id={id}
+        className="field"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={errorId}
+        aria-required={required || undefined}
+        style={{ ...style, ...errorFieldStyle(error) }}
+      />
+      {error ? <FieldError id={errorId} message={error} /> : hint && <p style={{ fontSize: 10.5, color: 'var(--clr-text-subtle)', margin: '4px 0 0' }}>{hint}</p>}
+    </div>
+  );
+};
 
 function SelectField({
-  label, children, ...props
-}: { label: string; children: React.ReactNode } & React.SelectHTMLAttributes<HTMLSelectElement>) {
+  label, children, id, ...props
+}: { label: string; children: React.ReactNode; id?: string } & React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <div>
-      <label style={labelStyle}>{label}</label>
-      <select {...props} className="field">{children}</select>
+      <label style={labelStyle} htmlFor={id}>{label}</label>
+      <select {...props} id={id} className="field">{children}</select>
     </div>
   );
 }
 
-function TextAreaField({ label, ...props }: { label: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+function TextAreaField({
+  label, error, id, style, ...props
+}: { label: string; error?: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const errorId = error && id ? `${id}-error` : undefined;
   return (
     <div>
-      <label style={labelStyle}>{label}</label>
-      <textarea {...props} className="field" style={{ resize: 'vertical', minHeight: 76, fontFamily: 'inherit' }} />
+      <label style={labelStyle} htmlFor={id}>{label}</label>
+      <textarea
+        {...props} id={id} className="field"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={errorId}
+        style={{ resize: 'vertical', minHeight: 76, fontFamily: 'inherit', ...style, ...errorFieldStyle(error) }}
+      />
+      <FieldError id={errorId} message={error} />
     </div>
   );
+}
+
+interface ItemErrors {
+  description?: string;
+  quantity?: string;
+  unitPrice?: string;
 }
 
 interface ItemRowProps {
@@ -97,17 +166,26 @@ interface ItemRowProps {
   index: number;
   currency: CurrencyCode;
   removeDisabled: boolean;
+  errors?: ItemErrors;
   onChange: (patch: Partial<InvoiceItem>) => void;
+  onBlurField: (field: keyof ItemErrors) => void;
   onRemove: () => void;
 }
+
+const itemErrorStyle: React.CSSProperties = { borderColor: '#FCA5A5', background: '#FEF2F2' };
 
 /** One editable row of the Items table. Amount is always derived
     (quantity × unitPrice), never itself an input — matches the
     "Amount auto-calculates" requirement literally: there is no
     onChange path that can set it directly. Declared as React.FC (not
     a plain function) — a plain `function ItemRow(...)` declaration
-    tripped a TS/JSX inference quirk in this project (see Sprint 2). */
-const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled, onChange, onRemove }) => {
+    tripped a TS/JSX inference quirk in this project (see Sprint 2).
+    Sprint 6: per-field validation (no empty description, qty/price > 0),
+    shown only once that specific cell has been blurred (or a save was
+    attempted) — mirrors the same touched-field gating the rest of the
+    form uses, so a fresh blank row doesn't show three errors at once
+    before the user has typed anything. */
+const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled, errors, onChange, onBlurField, onRemove }) => {
   const amount = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
   const cellInputStyle: React.CSSProperties = {
     width: '100%', padding: '7px 9px', background: '#f9fafb', border: '1.5px solid transparent',
@@ -115,13 +193,11 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled
     transition: 'all 150ms',
   };
   const onFocusStyle = (e: React.FocusEvent<HTMLInputElement>) => {
-    e.currentTarget.style.background = '#fff';
     e.currentTarget.style.borderColor = 'var(--brand-primary)';
     e.currentTarget.style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--brand-primary) 12%, transparent)';
   };
-  const onBlurStyle = (e: React.FocusEvent<HTMLInputElement>) => {
-    e.currentTarget.style.background = '#f9fafb';
-    e.currentTarget.style.borderColor = 'transparent';
+  const clearFocusStyle = (e: React.FocusEvent<HTMLInputElement>, hasError?: string) => {
+    e.currentTarget.style.borderColor = hasError ? '#FCA5A5' : 'transparent';
     e.currentTarget.style.boxShadow = 'none';
   };
 
@@ -130,32 +206,39 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled
       <td style={{ padding: '8px 10px', minWidth: 220 }}>
         <input
           type="text" placeholder={`Item ${index + 1} description`} value={item.description}
+          aria-label={`Item ${index + 1} description`} aria-invalid={!!errors?.description}
           onChange={e => onChange({ description: e.target.value })}
-          onFocus={onFocusStyle} onBlur={onBlurStyle}
-          style={cellInputStyle}
+          onFocus={onFocusStyle} onBlur={e => { clearFocusStyle(e, errors?.description); onBlurField('description'); }}
+          style={{ ...cellInputStyle, ...(errors?.description ? itemErrorStyle : undefined) }}
         />
+        {errors?.description && <FieldError message={errors.description} />}
       </td>
       <td style={{ padding: '8px 10px', width: 90 }}>
         <input
           type="number" min={0} value={item.quantity}
+          aria-label={`Item ${index + 1} quantity`} aria-invalid={!!errors?.quantity}
           onChange={e => onChange({ quantity: Number(e.target.value) })}
-          onFocus={onFocusStyle} onBlur={onBlurStyle}
-          style={{ ...cellInputStyle, textAlign: 'right' }}
+          onFocus={onFocusStyle} onBlur={e => { clearFocusStyle(e, errors?.quantity); onBlurField('quantity'); }}
+          style={{ ...cellInputStyle, textAlign: 'right', ...(errors?.quantity ? itemErrorStyle : undefined) }}
         />
+        {errors?.quantity && <FieldError message={errors.quantity} />}
       </td>
       <td style={{ padding: '8px 10px', width: 130 }}>
         <input
           type="number" min={0} value={item.unitPrice}
+          aria-label={`Item ${index + 1} unit price`} aria-invalid={!!errors?.unitPrice}
           onChange={e => onChange({ unitPrice: Number(e.target.value) })}
-          onFocus={onFocusStyle} onBlur={onBlurStyle}
-          style={{ ...cellInputStyle, textAlign: 'right' }}
+          onFocus={onFocusStyle} onBlur={e => { clearFocusStyle(e, errors?.unitPrice); onBlurField('unitPrice'); }}
+          style={{ ...cellInputStyle, textAlign: 'right', ...(errors?.unitPrice ? itemErrorStyle : undefined) }}
         />
+        {errors?.unitPrice && <FieldError message={errors.unitPrice} />}
       </td>
       <td style={{ padding: '8px 10px', width: 90 }}>
         <input
           type="number" min={0} max={100} value={item.taxPercent}
+          aria-label={`Item ${index + 1} tax percent`}
           onChange={e => onChange({ taxPercent: Number(e.target.value) })}
-          onFocus={onFocusStyle} onBlur={onBlurStyle}
+          onFocus={onFocusStyle} onBlur={e => clearFocusStyle(e)}
           style={{ ...cellInputStyle, textAlign: 'right' }}
         />
       </td>
@@ -168,7 +251,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled
       <td style={{ padding: '8px 10px', width: 44, textAlign: 'center' }}>
         <button
           type="button" onClick={onRemove} disabled={removeDisabled}
-          className="btn-icon" title="Remove item"
+          className="btn-icon" title="Remove item" aria-label={`Remove item ${index + 1}`}
           style={{ border: 'none', cursor: removeDisabled ? 'not-allowed' : 'pointer', opacity: removeDisabled ? 0.35 : 1 }}
           onMouseEnter={e => { if (!removeDisabled) { e.currentTarget.style.background = '#FEF2F2'; e.currentTarget.style.color = '#DC2626'; } }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--clr-text-muted)'; }}
@@ -212,6 +295,66 @@ const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const A4_PX_WIDTH = 794;
 const A4_PX_HEIGHT = 1123;
 
+const EMAIL_STATUS_TONE: Record<'Pending' | 'Sent' | 'Failed', BadgeTone> = {
+  Pending: 'neutral', Sent: 'success', Failed: 'danger',
+};
+
+/* ── Validation (Sprint 6) ──────────────────────────────────── */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Standard 15-character Indian GSTIN format: 2-digit state code, 10-
+    character PAN, 1-digit entity code, 'Z' by convention, 1 checksum
+    character. */
+const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+const PHONE_RE = /^[+]?[\d\s-]{7,15}$/;
+
+interface InvoiceFormErrors {
+  customerName?: string;
+  email?: string;
+  gstin?: string;
+  phone?: string;
+  dueDate?: string;
+  discount?: string;
+  items?: string;
+}
+
+/** All of "Customer required/email format/GST format/phone format",
+    "item minimums", and "due date >= invoice date" in one place, so
+    Save/Generate and the inline field errors always agree on what's
+    valid — there's no second, looser check anywhere else. Item rows
+    are validated individually (itemErrors, keyed by item.id) so each
+    row's own cells can show their own message rather than one generic
+    "items are invalid" banner. */
+function validateInvoiceForm(
+  customer: CustomerDetails, invoice: InvoiceDetails, items: InvoiceItem[], discount: number, subtotal: number
+): { errors: InvoiceFormErrors; itemErrors: Record<string, ItemErrors> } {
+  const errors: InvoiceFormErrors = {};
+
+  if (!customer.customerName.trim()) errors.customerName = 'Customer name is required.';
+  if (customer.email.trim() && !EMAIL_RE.test(customer.email.trim())) errors.email = 'Enter a valid email address.';
+  if (customer.gstin.trim() && !GSTIN_RE.test(customer.gstin.trim())) errors.gstin = 'Enter a valid 15-character GSTIN (e.g. 22AAAAA0000A1Z5).';
+  if (customer.phone.trim() && !PHONE_RE.test(customer.phone.trim())) errors.phone = 'Enter a valid phone number.';
+
+  if (invoice.invoiceDate && invoice.dueDate && invoice.dueDate < invoice.invoiceDate) {
+    errors.dueDate = 'Due date cannot be before the invoice date.';
+  }
+
+  if (discount < 0) errors.discount = 'Discount cannot be negative.';
+  else if (subtotal > 0 && discount > subtotal) errors.discount = 'Discount cannot exceed the subtotal.';
+
+  const itemErrors: Record<string, ItemErrors> = {};
+  items.forEach((item) => {
+    const rowErrors: ItemErrors = {};
+    if (!item.description.trim()) rowErrors.description = 'Description is required.';
+    if (!(Number(item.quantity) > 0)) rowErrors.quantity = 'Must be greater than 0.';
+    if (!(Number(item.unitPrice) > 0)) rowErrors.unitPrice = 'Must be greater than 0.';
+    if (Object.keys(rowErrors).length > 0) itemErrors[item.id] = rowErrors;
+  });
+  if (items.length === 0) errors.items = 'Add at least one item.';
+  else if (Object.keys(itemErrors).length > 0) errors.items = 'Fix the highlighted item row(s) below.';
+
+  return { errors, itemErrors };
+}
+
 /** Invoice Generator — Sprint 2 form, Sprint 3 live preview, Sprint 4
     real persistence. Create/Edit/View all share this one component and
     this one piece of state (no separate "view" component/state copy):
@@ -223,7 +366,27 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
   const [invoice, setInvoice] = useState<InvoiceDetails>(defaultInvoiceDetails);
   const [items, setItems] = useState<InvoiceItem[]>([createBlankInvoiceItem()]);
   const [discount, setDiscount] = useState(0);
+  /* Sprint 7 — seeded from Invoice Settings' defaults for a brand-new
+     invoice, then edited/persisted per-invoice from here on (loaded
+     from the record itself in the openRequest effect below, never
+     re-defaulted on edit). */
+  const [notes, setNotes] = useState(() => loadInvoiceSettings().defaultNotes);
+  const [terms, setTerms] = useState(() => loadInvoiceSettings().defaultTerms);
   const [notice, setNotice] = useState<string | null>(null);
+  /* Part 5 — synchronous duplicate-submission guard. `saving` (React
+     state) can't prevent a second persistInvoice() call fired before
+     the disabled-button re-render commits; this ref is checked/set
+     before any await, so a rapid double-click can never start two
+     save requests. */
+  const isSavingRef = useRef(false);
+
+  /* Sprint 6 — validation touched-state, same gating pattern App.tsx's
+     Salary Generator uses (touchedFields + a forced "show everything"
+     flag once a save is actually attempted), so a fresh blank form
+     never opens already covered in red. */
+  const [touched, setTouched] = useState<Partial<Record<keyof InvoiceFormErrors, boolean>>>({});
+  const [itemsTouched, setItemsTouched] = useState<Record<string, Partial<Record<keyof ItemErrors, boolean>>>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const [mode, setMode] = useState<'create' | 'edit' | 'view'>('create');
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -231,6 +394,19 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  /* Sprint 5 — PDF/Drive/Email state. driveFileUrl/emailStatusValue
+     mirror what's stored on the backend Invoice document (see
+     services/invoiceApi.ts's Invoice type); populated when an existing
+     invoice is loaded, and updated locally after each action succeeds. */
+  const [driveFileUrl, setDriveFileUrl] = useState<string | null>(null);
+  const [emailStatusValue, setEmailStatusValue] = useState<'Pending' | 'Sent' | 'Failed' | null>(null);
+  const [uploadingDrive, setUploadingDrive] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [openingPdf, setOpeningPdf] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const pdfRef = useRef<HTMLDivElement>(null);
 
   const [zoomMode, setZoomMode] = useState<'fixed' | 'fit'>('fixed');
   const [previewScale, setPreviewScale] = useState(0.75);
@@ -250,15 +426,55 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
     setTimeout(() => setNotice(null), 4000);
   };
 
+  // Computed early (not just before the JSX return) so validation
+  // below can reference totals.subtotal without a second subtotal
+  // calculation of its own (Part 9 — avoid duplicate computations).
+  const totals = useMemo(() => computeInvoiceTotals(items, discount), [items, discount]);
+
+  /** Part 9 — loadCompanySettings() reads + JSON.parses localStorage;
+      memoized once per mount (same pattern InvoicePreview.tsx/
+      InvoicePdf.tsx already use) instead of being called fresh on
+      every render just to read the email modal's companyName prop. */
+  const brand = useMemo(() => loadCompanySettings(), []);
+
+  const { errors: formErrors, itemErrors } = useMemo(
+    () => validateInvoiceForm(customer, invoice, items, discount, totals.subtotal),
+    [customer, invoice, items, discount, totals.subtotal]
+  );
+
+  const markTouched = (field: keyof InvoiceFormErrors) => setTouched(prev => (prev[field] ? prev : { ...prev, [field]: true }));
+  const markItemTouched = (id: string, field: keyof ItemErrors) =>
+    setItemsTouched(prev => (prev[id]?.[field] ? prev : { ...prev, [id]: { ...prev[id], [field]: true } }));
+  const shownError = (field: keyof InvoiceFormErrors): string | undefined =>
+    (touched[field] || submitAttempted) ? formErrors[field] : undefined;
+  const shownItemError = (id: string): ItemErrors | undefined => {
+    const rowErrors = itemErrors[id];
+    if (!rowErrors) return undefined;
+    const rowTouched = itemsTouched[id] || {};
+    const visible: ItemErrors = {};
+    (Object.keys(rowErrors) as (keyof ItemErrors)[]).forEach((field) => {
+      if (rowTouched[field] || submitAttempted) visible[field] = rowErrors[field];
+    });
+    return Object.keys(visible).length > 0 ? visible : undefined;
+  };
+
   const handleClear = () => {
     setCustomer(emptyCustomerDetails());
     setInvoice(defaultInvoiceDetails());
     setItems([createBlankInvoiceItem()]);
     setDiscount(0);
+    const settings = loadInvoiceSettings();
+    setNotes(settings.defaultNotes);
+    setTerms(settings.defaultTerms);
     setMode('create');
     setSavedId(null);
     setInvoiceNumber(null);
     setLoadError(null);
+    setDriveFileUrl(null);
+    setEmailStatusValue(null);
+    setTouched({});
+    setItemsTouched({});
+    setSubmitAttempted(false);
     showNotice('Form cleared.');
   };
 
@@ -285,8 +501,15 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
         });
         setItems(inv.items.length ? inv.items : [createBlankInvoiceItem()]);
         setDiscount(inv.discount);
+        setNotes(inv.notes);
+        setTerms(inv.termsAndConditions);
         setSavedId(inv.id);
         setInvoiceNumber(inv.invoiceNumber);
+        setDriveFileUrl(inv.driveFileUrl ?? null);
+        setEmailStatusValue(inv.emailStatus ?? null);
+        setTouched({});
+        setItemsTouched({});
+        setSubmitAttempted(false);
         setMode(openRequest.mode);
       })
       .catch((err) => {
@@ -300,45 +523,171 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRequest]);
 
-  function validateInvoice(): string | null {
-    if (!customer.customerName.trim()) return 'Customer Name is required.';
-    if (!items.some(item => item.description.trim() && Number(item.quantity) > 0)) {
-      return 'Add at least one item with a description and quantity.';
-    }
-    return null;
-  }
-
   /** Shared by both footer actions — the only difference between
       "Save as Draft" and "Generate Invoice" is which status gets
       saved; both POST when there's no savedId yet and PUT once one
       exists, so repeated draft saves update the same document instead
-      of creating duplicates (Part 4). */
+      of creating duplicates (Part 4). Returns the saved invoice (or
+      null on failure) so handleGenerate can chain the Sprint 5 PDF/
+      Drive pipeline onto a successful save. Sprint 6: validation is
+      now the full field-level check (see validateInvoiceForm) — a
+      failed attempt forces every error to become visible (touched
+      fields alone wouldn't surface a row the user never touched) and
+      relies on the inline messages rather than a generic banner,
+      per "show friendly validation messages" being about the field
+      itself, not a popup. Sprint 7 Part 5: `isSavingRef` is a
+      synchronous guard against duplicate submissions — checked and set
+      before any await, so a double-click can't start two overlapping
+      save requests the way relying on the `saving` state alone could
+      (that state only takes effect once React re-renders the disabled
+      button). */
   const persistInvoice = async (statusOverride?: InvoiceStatus) => {
-    const validationError = validateInvoice();
-    if (validationError) {
-      showNotice(validationError);
-      return;
+    if (isSavingRef.current) return null;
+
+    const hasErrors = Object.keys(formErrors).length > 0;
+    if (hasErrors) {
+      setSubmitAttempted(true);
+      showNotice('Please fix the highlighted fields before saving.');
+      return null;
     }
+
+    isSavingRef.current = true;
     setSaving(true);
-    const payload = { ...customer, ...invoice, status: statusOverride ?? invoice.status, items, discount, notes: '' };
+    const payload = {
+      ...customer, ...invoice, status: statusOverride ?? invoice.status, items, discount,
+      notes, termsAndConditions: terms,
+    };
     try {
-      const saved = savedId ? await updateInvoice(savedId, payload) : await createInvoice(payload);
+      const saved = savedId
+        ? await updateInvoice(savedId, payload)
+        : await createInvoice(payload, loadInvoiceSettings().invoicePrefix);
       setSavedId(saved.id);
       setInvoiceNumber(saved.invoiceNumber);
       if (statusOverride) patchInvoice({ status: statusOverride });
       setMode('edit');
-      showNotice(`Invoice ${saved.invoiceNumber} ${savedId ? 'updated' : 'created'} successfully.`);
+      return saved;
     } catch (err) {
-      showNotice(err instanceof ApiError ? err.message : 'Failed to save invoice.');
+      showNotice(err instanceof ApiError ? err.message : 'Failed to save invoice. Please check your connection and try again.');
+      return null;
     } finally {
       setSaving(false);
+      isSavingRef.current = false;
     }
   };
 
-  const handleSaveDraft = () => persistInvoice('Draft');
-  const handleGenerate = () => persistInvoice();
+  const handleSaveDraft = async () => {
+    const saved = await persistInvoice('Draft');
+    if (saved) showNotice(`Invoice ${saved.invoiceNumber} saved as draft.`);
+  };
 
-  const totals = useMemo(() => computeInvoiceTotals(items, discount), [items, discount]);
+  /** Part 5's workflow: Generate Invoice → Generate PDF → Upload PDF →
+      Save Google Drive File ID → Update MongoDB. The Mongo save above
+      is step one; once it succeeds, this chains PDF generation +
+      Drive upload onto it automatically. A Drive failure (e.g. not
+      connected yet) is caught and reported as a softer warning — the
+      invoice itself is already safely saved either way, matching
+      pdfStorage.service.js's storePdf "best-effort, never turn a
+      successful save into a failure" precedent for the Salary PDF's
+      own Drive upload. */
+  const handleGenerate = async () => {
+    const saved = await persistInvoice();
+    if (!saved) return;
+
+    setUploadingDrive(true);
+    try {
+      if (!pdfRef.current) throw new Error('PDF render target is not ready');
+      const { blob, fileName } = await generateInvoicePdf(pdfRef.current, saved.invoiceNumber);
+      const withDrive = await uploadInvoicePdf(saved.id, blob, fileName);
+      setDriveFileUrl(withDrive.driveFileUrl ?? null);
+      showNotice(`Invoice ${saved.invoiceNumber} generated and uploaded to Google Drive.`);
+    } catch (err) {
+      console.error('[invoice] Google Drive upload failed:', err);
+      showNotice(
+        `Invoice ${saved.invoiceNumber} saved, but Google Drive upload failed` +
+        `${err instanceof ApiError ? `: ${err.message}` : '.'}`
+      );
+    } finally {
+      setUploadingDrive(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!pdfRef.current || !invoiceNumber) {
+      showNotice('Save the invoice before downloading.');
+      return;
+    }
+    setDownloading(true);
+    try {
+      const { pdf, fileName } = await generateInvoicePdf(pdfRef.current, invoiceNumber);
+      pdf.save(fileName);
+    } catch (err) {
+      console.error('[invoice] PDF download failed:', err);
+      showNotice('Failed to generate PDF. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  /** Print Invoice — toggles the .invoice-printing class the scoped
+      print CSS (index.css) gates on, so #invoice-pdf-area is the only
+      thing the browser prints; window.print() itself renders the live
+      DOM, not a rasterized image, so this is higher print quality than
+      the Download PDF path for content that spans multiple pages. */
+  const handlePrint = () => {
+    if (!invoiceNumber) {
+      showNotice('Save the invoice before printing.');
+      return;
+    }
+    const cleanup = () => {
+      document.body.classList.remove('invoice-printing');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    document.body.classList.add('invoice-printing');
+    window.print();
+  };
+
+  const handleOpenPdf = async () => {
+    if (!pdfRef.current || !invoiceNumber) {
+      showNotice('Save the invoice before opening the PDF.');
+      return;
+    }
+    setOpeningPdf(true);
+    try {
+      const { blob } = await generateInvoicePdf(pdfRef.current, invoiceNumber);
+      window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+    } catch (err) {
+      console.error('[invoice] PDF open failed:', err);
+      showNotice('Failed to generate PDF. Please try again.');
+    } finally {
+      setOpeningPdf(false);
+    }
+  };
+
+  const handleOpenDrive = () => {
+    if (driveFileUrl) window.open(driveFileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSendEmail = async (to: string, subject: string) => {
+    if (!pdfRef.current || !savedId || !invoiceNumber) return;
+    setEmailSending(true);
+    try {
+      const { blob } = await generateInvoicePdf(pdfRef.current, invoiceNumber);
+      const updated = await emailInvoice(savedId, {
+        recipientEmail: to, subject, companyName: brand.companyName, pdfBlob: blob,
+      });
+      setEmailStatusValue(updated.emailStatus ?? 'Sent');
+      setEmailModalOpen(false);
+      showNotice(`Invoice emailed to ${to}.`);
+    } catch (err) {
+      console.error('[invoice] Email send failed:', err);
+      setEmailStatusValue('Failed');
+      showNotice(err instanceof ApiError ? err.message : 'Failed to send email.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   const fmt = (n: number) => formatAmount(n, invoice.currency);
   const isViewMode = mode === 'view';
 
@@ -382,6 +731,50 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
       <Breadcrumb items={[{ label: 'Finance' }, { label: pageTitle }]} />
       <PageHeader title={pageTitle} description={pageDescription} />
 
+      {/* Sprint 5, Part 7 — Invoice Actions, available once the invoice
+          has been saved at least once (Download/Print/Email/Open PDF
+          all need a real invoiceNumber; Open in Drive needs a prior
+          successful upload). Same actions are also available from
+          Invoice History (see InvoiceHistoryPage.tsx). */}
+      {savedId && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 2 }}>
+            Invoice Actions
+          </span>
+          <button type="button" onClick={handleDownload} disabled={downloading} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
+          </button>
+          <button type="button" onClick={handlePrint} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            <Printer size={13} /> Print
+          </button>
+          <button
+            type="button" onClick={() => setEmailModalOpen(true)} disabled={!customer.email.trim()}
+            className="btn btn-secondary" style={{ fontSize: 12, opacity: customer.email.trim() ? 1 : 0.5 }}
+            title={customer.email.trim() ? undefined : 'No customer email on file — add one in Customer Details first'}
+          >
+            <Mail size={13} /> Email Invoice
+          </button>
+          <button type="button" onClick={handleOpenPdf} disabled={openingPdf} className="btn btn-secondary" style={{ fontSize: 12 }}>
+            {openingPdf ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />} Open PDF
+          </button>
+          <button
+            type="button" onClick={handleOpenDrive} disabled={!driveFileUrl} className="btn btn-secondary"
+            style={{ fontSize: 12, opacity: driveFileUrl ? 1 : 0.5, cursor: driveFileUrl ? 'pointer' : 'not-allowed' }}
+            title={driveFileUrl ? 'Open the archived PDF in Google Drive' : 'Not uploaded to Google Drive yet — click Generate Invoice'}
+          >
+            <Cloud size={13} /> Open in Drive
+          </button>
+          {uploadingDrive && (
+            <span style={{ fontSize: 11.5, color: 'var(--clr-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Loader2 size={12} className="animate-spin" /> Uploading to Google Drive…
+            </span>
+          )}
+          {emailStatusValue && (
+            <StatusBadge label={`Email: ${emailStatusValue}`} tone={EMAIL_STATUS_TONE[emailStatusValue]} />
+          )}
+        </div>
+      )}
+
       {loadingRecord && (
         <div style={{
           marginBottom: 16, padding: '10px 14px', borderRadius: 8,
@@ -422,13 +815,39 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
         }}>
           <Card title="Customer Details" icon={<User size={13} />}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-              <Field label="Customer Name" value={customer.customerName} onChange={e => patchCustomer({ customerName: e.target.value })} placeholder="Jane Doe" />
-              <Field label="Company Name" value={customer.companyName} onChange={e => patchCustomer({ companyName: e.target.value })} placeholder="Acme Pvt. Ltd." />
-              <Field label="Email" type="email" value={customer.email} onChange={e => patchCustomer({ email: e.target.value })} placeholder="jane@acme.com" />
-              <Field label="Phone" value={customer.phone} onChange={e => patchCustomer({ phone: e.target.value })} placeholder="9876543210" />
-              <Field label="GSTIN" value={customer.gstin} onChange={e => patchCustomer({ gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
+              <Field
+                id="invoice-customerName" label="Customer Name" required value={customer.customerName}
+                onChange={e => patchCustomer({ customerName: e.target.value })}
+                onBlur={() => markTouched('customerName')} error={shownError('customerName')}
+                placeholder="Jane Doe"
+              />
+              <Field
+                id="invoice-companyName" label="Company Name" value={customer.companyName}
+                onChange={e => patchCustomer({ companyName: e.target.value })} placeholder="Acme Pvt. Ltd."
+              />
+              <Field
+                id="invoice-email" label="Email" type="email" value={customer.email}
+                onChange={e => patchCustomer({ email: e.target.value })}
+                onBlur={() => markTouched('email')} error={shownError('email')}
+                placeholder="jane@acme.com"
+              />
+              <Field
+                id="invoice-phone" label="Phone" value={customer.phone}
+                onChange={e => patchCustomer({ phone: e.target.value })}
+                onBlur={() => markTouched('phone')} error={shownError('phone')}
+                placeholder="9876543210"
+              />
+              <Field
+                id="invoice-gstin" label="GSTIN" value={customer.gstin}
+                onChange={e => patchCustomer({ gstin: e.target.value })}
+                onBlur={() => markTouched('gstin')} error={shownError('gstin')}
+                placeholder="22AAAAA0000A1Z5"
+              />
               <div style={{ gridColumn: '1 / -1' }}>
-                <TextAreaField label="Billing Address" value={customer.billingAddress} onChange={e => patchCustomer({ billingAddress: e.target.value })} placeholder="Street, City, State - PIN" />
+                <TextAreaField
+                  id="invoice-billingAddress" label="Billing Address" value={customer.billingAddress}
+                  onChange={e => patchCustomer({ billingAddress: e.target.value })} placeholder="Street, City, State - PIN"
+                />
               </div>
             </div>
           </Card>
@@ -436,19 +855,26 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
           <Card title="Invoice Details" icon={<ClipboardList size={13} />}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
               <Field
-                label="Invoice Number" value={invoiceNumber ?? 'Will be assigned on save'} readOnly
+                id="invoice-number" label="Invoice Number" value={invoiceNumber ?? 'Will be assigned on save'} readOnly
                 hint={invoiceNumber ? 'Assigned automatically — read-only' : 'Auto-generated on save'}
                 style={{ background: 'var(--clr-bg)', color: 'var(--clr-text-muted)', cursor: 'not-allowed' }}
               />
-              <Field label="Invoice Date" type="date" value={invoice.invoiceDate} onChange={e => patchInvoice({ invoiceDate: e.target.value })} />
-              <Field label="Due Date" type="date" value={invoice.dueDate} onChange={e => patchInvoice({ dueDate: e.target.value })} />
-              <SelectField label="Payment Terms" value={invoice.paymentTerms} onChange={e => patchInvoice({ paymentTerms: e.target.value as InvoiceDetails['paymentTerms'] })}>
+              <Field
+                id="invoice-invoiceDate" label="Invoice Date" type="date" value={invoice.invoiceDate}
+                onChange={e => patchInvoice({ invoiceDate: e.target.value })}
+              />
+              <Field
+                id="invoice-dueDate" label="Due Date" type="date" value={invoice.dueDate}
+                onChange={e => patchInvoice({ dueDate: e.target.value })}
+                onBlur={() => markTouched('dueDate')} error={shownError('dueDate')}
+              />
+              <SelectField id="invoice-paymentTerms" label="Payment Terms" value={invoice.paymentTerms} onChange={e => patchInvoice({ paymentTerms: e.target.value as InvoiceDetails['paymentTerms'] })}>
                 {PAYMENT_TERMS.map(term => <option key={term} value={term}>{term}</option>)}
               </SelectField>
-              <SelectField label="Currency" value={invoice.currency} onChange={e => patchInvoice({ currency: e.target.value as CurrencyCode })}>
+              <SelectField id="invoice-currency" label="Currency" value={invoice.currency} onChange={e => patchInvoice({ currency: e.target.value as CurrencyCode })}>
                 {CURRENCY_CODES.map(code => <option key={code} value={code}>{code} — {CURRENCY_META[code].label}</option>)}
               </SelectField>
-              <SelectField label="Invoice Status" value={invoice.status} onChange={e => patchInvoice({ status: e.target.value as InvoiceStatus })}>
+              <SelectField id="invoice-status" label="Invoice Status" value={invoice.status} onChange={e => patchInvoice({ status: e.target.value as InvoiceStatus })}>
                 {INVOICE_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
               </SelectField>
             </div>
@@ -460,7 +886,7 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
                 <thead>
                   <tr style={{ background: 'var(--clr-bg)' }}>
                     {['Description', 'Qty', 'Unit Price', 'Tax %', 'Amount', ''].map((h, i) => (
-                      <th key={h || 'actions'} style={{
+                      <th key={h || 'actions'} scope="col" style={{
                         textAlign: i === 0 ? 'left' : i === 5 ? 'center' : 'right',
                         padding: '11px 14px', fontSize: 10.5, fontWeight: 700, color: 'var(--clr-text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--clr-border)',
@@ -479,39 +905,58 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
                       index={index}
                       currency={invoice.currency}
                       removeDisabled={items.length <= 1}
+                      errors={shownItemError(item.id)}
                       onChange={patch => patchItem(item.id, patch)}
+                      onBlurField={field => markItemTouched(item.id, field)}
                       onRemove={() => removeItem(item.id)}
                     />
                   ))}
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 14px', borderTop: '1px solid var(--clr-border)' }}>
+            <div style={{ padding: '12px 14px', borderTop: '1px solid var(--clr-border)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <button type="button" onClick={addItem} className="btn btn-secondary" style={{ fontSize: 12 }}>
                 <Plus size={13} /> Add Item
               </button>
+              {(submitAttempted && formErrors.items) && <FieldError message={formErrors.items} />}
             </div>
           </Card>
 
           <Card title="Summary" icon={<Calculator size={13} />}>
             <div style={{ maxWidth: 360, marginLeft: 'auto', display: 'flex', flexDirection: 'column' }}>
               <SummaryRow label="Subtotal" value={fmt(totals.subtotal)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--clr-text-muted)' }}>Discount</span>
-                <input
-                  type="number" min={0} value={discount}
-                  onChange={e => setDiscount(Number(e.target.value))}
-                  style={{
-                    width: 120, padding: '5px 9px', textAlign: 'right', border: '1.5px solid var(--clr-border)',
-                    borderRadius: 6, fontSize: 12.5, fontFamily: 'inherit', color: 'var(--clr-text)',
-                  }}
-                />
+              <div style={{ padding: '6px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label htmlFor="invoice-discount" style={{ fontSize: 12, fontWeight: 500, color: 'var(--clr-text-muted)' }}>Discount</label>
+                  <input
+                    id="invoice-discount"
+                    type="number" min={0} value={discount}
+                    aria-invalid={!!shownError('discount')}
+                    aria-describedby={shownError('discount') ? 'invoice-discount-error' : undefined}
+                    onChange={e => setDiscount(Number(e.target.value))}
+                    onBlur={() => markTouched('discount')}
+                    style={{
+                      width: 120, padding: '5px 9px', textAlign: 'right', borderRadius: 6, fontSize: 12.5,
+                      fontFamily: 'inherit', color: 'var(--clr-text)',
+                      border: shownError('discount') ? '1.5px solid #FCA5A5' : '1.5px solid var(--clr-border)',
+                      boxShadow: shownError('discount') ? '0 0 0 3px rgba(220,38,38,0.10)' : undefined,
+                    }}
+                  />
+                </div>
+                {shownError('discount') && <div style={{ textAlign: 'right' }}><FieldError id="invoice-discount-error" message={shownError('discount')} /></div>}
               </div>
               <SummaryRow label="Taxable Amount" value={fmt(totals.taxableAmount)} />
               <SummaryRow label="CGST" value={fmt(totals.cgst)} />
               <SummaryRow label="SGST" value={fmt(totals.sgst)} />
               <SummaryRow label="Round Off" value={fmt(totals.roundOff)} />
               <SummaryRow label="Grand Total" value={fmt(totals.grandTotal)} emphasis />
+            </div>
+          </Card>
+
+          <Card title="Notes & Terms" icon={<FileText size={13} />}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+              <TextAreaField id="invoice-notes" label="Notes" value={notes} onChange={e => setNotes(e.target.value)} />
+              <TextAreaField id="invoice-terms" label="Terms & Conditions" value={terms} onChange={e => setTerms(e.target.value)} />
             </div>
           </Card>
 
@@ -554,6 +999,10 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
             onZoomOut={handleZoomOut}
             onSetZoom={handleSetZoom}
             onFitToScreen={handleFitToScreen}
+            onPrint={handlePrint}
+            onDownload={handleDownload}
+            actionsDisabled={!invoiceNumber}
+            downloading={downloading}
           />
 
           <div className="preview-shell" ref={shellRef}>
@@ -564,7 +1013,9 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
               }}>
                 <div style={{
                   width: A4_PX_WIDTH, transformOrigin: 'top center', transform: `scale(${previewScale})`,
-                  flexShrink: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.35)', borderRadius: 3, height: 'fit-content',
+                  transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1)',
+                  flexShrink: 0, boxShadow: '0 12px 40px rgba(15, 23, 42, 0.28), 0 2px 8px rgba(15, 23, 42, 0.12)',
+                  borderRadius: 3, height: 'fit-content',
                 }}>
                   <InvoicePreview
                     customer={customer}
@@ -572,6 +1023,8 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
                     invoiceNumber={invoiceNumber ?? 'Pending — assigned on save'}
                     items={items}
                     totals={totals}
+                    notes={notes}
+                    terms={terms}
                   />
                 </div>
               </div>
@@ -585,6 +1038,35 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
           </div>
         </aside>
       </div>
+
+      {/* Off-screen PDF/print render target (Sprint 5) — same relationship
+          App.tsx's own <SalarySlipPDF pdfRef={pdfRef} /> mount has to that
+          module: always mounted, never visible on screen, captured by
+          generateInvoicePdf.ts for Download/Open PDF/Email, and made the
+          browser's print target by the .invoice-printing class (see
+          index.css) for Print Invoice. */}
+      <div className="finance-pdf-offscreen" aria-hidden="true">
+        <InvoicePdf
+          customer={customer}
+          invoice={invoice}
+          invoiceNumber={invoiceNumber ?? 'PENDING'}
+          items={items}
+          totals={totals}
+          notes={notes}
+          terms={terms}
+          pdfRef={pdfRef}
+        />
+      </div>
+
+      <EmailInvoiceModal
+        isOpen={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+        invoiceNumber={invoiceNumber ?? ''}
+        customerEmail={customer.email}
+        companyName={brand.companyName}
+        sending={emailSending}
+        onSend={handleSendEmail}
+      />
     </div>
   );
 }

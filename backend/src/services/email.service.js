@@ -310,3 +310,74 @@ export async function sendSalaryEmail({
 
   return log;
 }
+
+function buildInvoiceHtmlBody({ customerName, invoiceNumber, companyName }) {
+  const paragraphs = [
+    `Dear ${customerName || 'Customer'},`,
+    `Please find attached invoice <strong>${invoiceNumber}</strong>${companyName ? ` from ${companyName}` : ''}.`,
+    'Kindly review the attached document. If you have any questions, please feel free to reach out.',
+    `Thank you for your business.<br>${companyName || ''}`,
+  ];
+  const body = paragraphs.map((p) => `<p style="margin:0 0 14px;">${p}</p>`).join('\n');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;line-height:1.6;">${body}</div>`;
+}
+
+function buildInvoiceTextBody({ customerName, invoiceNumber, companyName }) {
+  return `Dear ${customerName || 'Customer'},
+
+Please find attached invoice ${invoiceNumber}${companyName ? ` from ${companyName}` : ''}.
+
+Kindly review the attached document. If you have any questions, please feel free to reach out.
+
+Thank you for your business.
+${companyName || ''}`;
+}
+
+/**
+ * Invoice email send (Sprint 5) — reuses this module's Resend client
+ * (getResendClient) and error categorization (categorizeResendError)
+ * directly rather than duplicating that boilerplate in a separate
+ * file, per "reuse the existing Resend email infrastructure". Kept
+ * deliberately independent of sendSalaryEmail above: its own
+ * subject/body copy, no EmailLog/SalaryHistory writes (Invoice tracks
+ * its own emailStatus/emailSentAt/emailRecipient — see
+ * services/invoice.service.js's emailInvoicePdf, which calls this and
+ * then updates the Invoice document itself), and — unlike
+ * sendSalaryEmail — no PdfArchive/Google-Drive-already-uploaded
+ * precondition, since Download/Print/Email/Drive are independent
+ * actions for Invoice (see Sprint 5 spec's Part 7), not a fixed
+ * pipeline order.
+ */
+export async function sendInvoiceEmail({ recipientEmail, invoiceNumber, customerName, companyName, subject: customSubject, buffer }) {
+  if (!recipientEmail) {
+    throw new AppError('Recipient email is required', 400, 'validation');
+  }
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new AppError('PDF attachment is missing or empty', 400, 'attachment');
+  }
+  if (buffer.subarray(0, 5).toString('ascii') !== PDF_MAGIC_BYTES) {
+    throw new AppError('PDF attachment is not a valid PDF file', 400, 'attachment');
+  }
+
+  const subject = (customSubject && customSubject.trim()) || `Invoice ${invoiceNumber}${companyName ? ` from ${companyName}` : ''}`;
+  const text = buildInvoiceTextBody({ customerName, invoiceNumber, companyName });
+  const html = buildInvoiceHtmlBody({ customerName, invoiceNumber, companyName });
+
+  try {
+    const { error } = await getResendClient().emails.send({
+      from: process.env.EMAIL_FROM,
+      to: recipientEmail,
+      subject,
+      text,
+      html,
+      attachments: [{ filename: `${invoiceNumber}.pdf`, content: buffer, contentType: 'application/pdf' }],
+    });
+    if (error) throw error;
+  } catch (err) {
+    const reason = categorizeResendError(err);
+    console.error('[email] Resend invoice send failed:', { name: err?.name, message: err?.message, recipientEmail });
+    throw new AppError(`Failed to send email: ${reason}`, 502, 'email');
+  }
+
+  return { sentAt: new Date(), recipientEmail };
+}

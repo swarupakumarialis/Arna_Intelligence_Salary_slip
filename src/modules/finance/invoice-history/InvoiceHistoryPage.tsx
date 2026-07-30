@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Eye, Pencil, Copy, Trash2, History, ChevronLeft, ChevronRight, Loader2,
+  Download, Printer, Mail, ExternalLink, Cloud,
 } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { Breadcrumb } from '../../../components/ui/Breadcrumb';
@@ -8,13 +9,22 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { StatusBadge, BadgeTone } from '../../../components/ui/StatusBadge';
 import { TableToolbar, SearchInput } from '../../../components/ui/TableToolbar';
 import { formatAmount } from '../../../utils/currencyService';
-import { INVOICE_STATUSES, InvoiceStatus } from '../types';
+import { loadCompanySettings } from '../../../utils/companySettingsStore';
+import { loadInvoiceSettings } from '../utils/invoiceSettingsStore';
+import { Invoice, INVOICE_STATUSES, InvoiceStatus } from '../types';
 import { computeInvoiceTotals } from '../utils';
-import { ApiError, createInvoice, getInvoice } from '../services/invoiceApi';
+import { ApiError, createInvoice, emailInvoice, getInvoice } from '../services/invoiceApi';
 import { useInvoices, InvoiceSort } from '../hooks/useInvoices';
+import { InvoicePdf } from '../invoice-generator/pdf/InvoicePdf';
+import { generateInvoicePdf } from '../invoice-generator/pdf/generateInvoicePdf';
+import { EmailInvoiceModal } from '../invoice-generator/components/EmailInvoiceModal';
 
+/** Overdue reads as 'danger' (most urgent — needs action now); Partially
+    Paid as 'warning' (in progress, distinct from Overdue); Cancelled
+    shares Draft's 'neutral' tone — both are inactive/non-actionable
+    states, same convention Stripe/QuickBooks use for void vs. draft. */
 const STATUS_TONE: Record<InvoiceStatus, BadgeTone> = {
-  Draft: 'neutral', Sent: 'info', Paid: 'success', Overdue: 'warning', Cancelled: 'danger',
+  Draft: 'neutral', Sent: 'info', Paid: 'success', 'Partially Paid': 'warning', Overdue: 'danger', Cancelled: 'neutral',
 };
 
 const SORT_OPTIONS: { value: InvoiceSort; label: string }[] = [
@@ -47,12 +57,108 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
     sort, setSort, refresh, removeInvoice,
   } = useInvoices();
 
+  // Part 9 — memoized once per mount rather than re-reading/parsing
+  // localStorage on every render just for the email modal's prop.
+  const brand = useMemo(() => loadCompanySettings(), []);
+
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  /* Sprint 5, Part 7 — Download/Print/Email/Open PDF from a History
+     row. Unlike InvoiceGeneratorPage (which always has a live
+     off-screen InvoicePdf mounted for the invoice currently being
+     edited), History has no single "current" invoice — so it mounts
+     one on demand for whichever row's action was just clicked, waits
+     a couple of frames for it to render, captures/prints it, then
+     unmounts it. `items` from useInvoices already carries each row's
+     full items/customer/etc. (see invoiceApi.ts's fromApiRecord), so
+     no extra fetch is needed before rendering it. */
+  const [pdfTargetInvoice, setPdfTargetInvoice] = useState<Invoice | null>(null);
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const [emailTargetInvoice, setEmailTargetInvoice] = useState<Invoice | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
 
   const showNotice = (message: string) => {
     setNotice(message);
     setTimeout(() => setNotice(null), 4000);
+  };
+
+  async function withRowPdf<T>(invoice: Invoice, action: (result: Awaited<ReturnType<typeof generateInvoicePdf>>) => Promise<T> | T): Promise<T> {
+    setPdfTargetInvoice(invoice);
+    // Two frames: one for React to commit the off-screen node, one for
+    // the browser to have laid it out before html2canvas reads it.
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    try {
+      if (!pdfRef.current) throw new Error('PDF render target is not ready');
+      const result = await generateInvoicePdf(pdfRef.current, invoice.invoiceNumber);
+      return await action(result);
+    } finally {
+      setPdfTargetInvoice(null);
+    }
+  }
+
+  const handleDownloadRow = async (invoice: Invoice) => {
+    setBusyId(invoice.id);
+    try {
+      await withRowPdf(invoice, ({ pdf, fileName }) => { pdf.save(fileName); });
+    } catch (err) {
+      console.error('[invoice] PDF download failed:', err);
+      showNotice('Failed to generate PDF. Please try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleOpenPdfRow = async (invoice: Invoice) => {
+    setBusyId(invoice.id);
+    try {
+      await withRowPdf(invoice, ({ blob }) => { window.open(URL.createObjectURL(blob), '_blank', 'noopener'); });
+    } catch (err) {
+      console.error('[invoice] PDF open failed:', err);
+      showNotice('Failed to generate PDF. Please try again.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /** Print doesn't need html2canvas at all — it just needs the
+      off-screen node rendered with this row's data before the browser
+      prints it, same .invoice-printing gate InvoiceGeneratorPage uses. */
+  const handlePrintRow = async (invoice: Invoice) => {
+    setPdfTargetInvoice(invoice);
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const cleanup = () => {
+      document.body.classList.remove('invoice-printing');
+      window.removeEventListener('afterprint', cleanup);
+      setPdfTargetInvoice(null);
+    };
+    window.addEventListener('afterprint', cleanup);
+    document.body.classList.add('invoice-printing');
+    window.print();
+  };
+
+  const handleOpenDriveRow = (invoice: Invoice) => {
+    if (invoice.driveFileUrl) window.open(invoice.driveFileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSendEmailRow = async (to: string, subject: string) => {
+    if (!emailTargetInvoice) return;
+    setEmailSending(true);
+    try {
+      await withRowPdf(emailTargetInvoice, async ({ blob }) => {
+        await emailInvoice(emailTargetInvoice.id, { recipientEmail: to, subject, companyName: brand.companyName, pdfBlob: blob });
+      });
+      setEmailTargetInvoice(null);
+      refresh();
+      showNotice(`Invoice emailed to ${to}.`);
+    } catch (err) {
+      console.error('[invoice] Email send failed:', err);
+      showNotice(err instanceof ApiError ? err.message : 'Failed to send email.');
+    } finally {
+      setEmailSending(false);
+    }
   };
 
   const handleDelete = async (id: string, invoiceNumber: string) => {
@@ -62,6 +168,7 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
       await removeInvoice(id);
       showNotice(`Invoice ${invoiceNumber} deleted.`);
     } catch (err) {
+      console.error('[invoice] Delete failed:', err);
       showNotice(err instanceof ApiError ? err.message : 'Failed to delete invoice.');
     } finally {
       setBusyId(null);
@@ -78,10 +185,11 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
     try {
       const source = await getInvoice(id);
       const { id: _id, invoiceNumber: _invoiceNumber, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = source;
-      const copy = await createInvoice({ ...rest, status: 'Draft' });
+      const copy = await createInvoice({ ...rest, status: 'Draft' }, loadInvoiceSettings().invoicePrefix);
       refresh();
       showNotice(`Duplicated as ${copy.invoiceNumber}.`);
     } catch (err) {
+      console.error('[invoice] Duplicate failed:', err);
       showNotice(err instanceof ApiError ? err.message : 'Failed to duplicate invoice.');
     } finally {
       setBusyId(null);
@@ -155,7 +263,7 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
                 <thead>
                   <tr style={{ background: 'var(--clr-bg)' }}>
                     {['Invoice Number', 'Customer', 'Invoice Date', 'Status', 'Currency', 'Grand Total', 'Created Date', 'Actions'].map((h, i) => (
-                      <th key={h} style={{
+                      <th key={h} scope="col" style={{
                         textAlign: i === 5 ? 'right' : i === 7 ? 'center' : 'left',
                         padding: '11px 14px', fontSize: 10.5, fontWeight: 700, color: 'var(--clr-text-muted)',
                         textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--clr-border)',
@@ -180,16 +288,42 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--clr-text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatAmount(grandTotal, invoice.currency)}</td>
                         <td style={{ padding: '10px 14px', color: 'var(--clr-text-muted)', whiteSpace: 'nowrap' }}>{invoice.createdAt ? invoice.createdAt.slice(0, 10) : '—'}</td>
                         <td style={{ padding: '8px 10px' }}>
-                          <div style={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-                            <button onClick={() => onOpenInvoice(invoice.id, 'view')} title="View" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Eye size={13} /></button>
-                            <button onClick={() => onOpenInvoice(invoice.id, 'edit')} title="Edit" className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Pencil size={13} /></button>
-                            <button onClick={() => handleDuplicate(invoice.id)} disabled={rowBusy} title="Duplicate" className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
+                          <div style={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'nowrap' }}>
+                            <button onClick={() => onOpenInvoice(invoice.id, 'view')} title="View" aria-label={`View invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Eye size={13} /></button>
+                            <button onClick={() => onOpenInvoice(invoice.id, 'edit')} title="Edit" aria-label={`Edit invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Pencil size={13} /></button>
+                            <button onClick={() => handleDownloadRow(invoice)} disabled={rowBusy} title="Download PDF" aria-label={`Download PDF for invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
+                              {rowBusy && busyId === invoice.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                            </button>
+                            <button onClick={() => handlePrintRow(invoice)} disabled={rowBusy} title="Print" aria-label={`Print invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}><Printer size={13} /></button>
+                            <button
+                              onClick={() => setEmailTargetInvoice(invoice)}
+                              disabled={rowBusy || !invoice.email}
+                              title={invoice.email ? 'Email Invoice' : 'No customer email on file — add one first'}
+                              aria-label={invoice.email ? `Email invoice ${invoice.invoiceNumber}` : `Email invoice ${invoice.invoiceNumber} — no customer email on file`}
+                              className="btn-icon"
+                              style={{ border: 'none', cursor: (rowBusy || !invoice.email) ? 'not-allowed' : 'pointer', opacity: invoice.email ? 1 : 0.35 }}
+                            >
+                              <Mail size={13} />
+                            </button>
+                            <button onClick={() => handleOpenPdfRow(invoice)} disabled={rowBusy} title="Open PDF" aria-label={`Open PDF for invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}><ExternalLink size={13} /></button>
+                            <button
+                              onClick={() => handleOpenDriveRow(invoice)}
+                              disabled={!invoice.driveFileUrl}
+                              title={invoice.driveFileUrl ? 'Open in Google Drive' : 'Not uploaded to Google Drive yet'}
+                              aria-label={invoice.driveFileUrl ? `Open invoice ${invoice.invoiceNumber} in Google Drive` : `Invoice ${invoice.invoiceNumber} not uploaded to Google Drive yet`}
+                              className="btn-icon"
+                              style={{ border: 'none', cursor: invoice.driveFileUrl ? 'pointer' : 'not-allowed', opacity: invoice.driveFileUrl ? 1 : 0.35 }}
+                            >
+                              <Cloud size={13} />
+                            </button>
+                            <button onClick={() => handleDuplicate(invoice.id)} disabled={rowBusy} title="Duplicate" aria-label={`Duplicate invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
                               {rowBusy ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
                             </button>
                             <button
                               onClick={() => handleDelete(invoice.id, invoice.invoiceNumber)}
                               disabled={rowBusy}
                               title="Delete"
+                              aria-label={`Delete invoice ${invoice.invoiceNumber}`}
                               className="btn-icon"
                               style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}
                               onMouseEnter={e => { e.currentTarget.style.color = 'var(--clr-danger)'; }}
@@ -232,6 +366,42 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
           )}
         </>
       )}
+
+      {/* On-demand off-screen PDF/print render target — see withRowPdf
+          above for why this mounts a specific row's invoice rather
+          than the "current" one InvoiceGeneratorPage always has. */}
+      {pdfTargetInvoice && (
+        <div className="finance-pdf-offscreen" aria-hidden="true">
+          <InvoicePdf
+            customer={{
+              customerName: pdfTargetInvoice.customerName, companyName: pdfTargetInvoice.companyName,
+              email: pdfTargetInvoice.email, phone: pdfTargetInvoice.phone,
+              gstin: pdfTargetInvoice.gstin, billingAddress: pdfTargetInvoice.billingAddress,
+            }}
+            invoice={{
+              invoiceDate: pdfTargetInvoice.invoiceDate, dueDate: pdfTargetInvoice.dueDate,
+              paymentTerms: pdfTargetInvoice.paymentTerms, currency: pdfTargetInvoice.currency,
+              status: pdfTargetInvoice.status,
+            }}
+            invoiceNumber={pdfTargetInvoice.invoiceNumber}
+            items={pdfTargetInvoice.items}
+            totals={computeInvoiceTotals(pdfTargetInvoice.items, pdfTargetInvoice.discount)}
+            notes={pdfTargetInvoice.notes}
+            terms={pdfTargetInvoice.termsAndConditions}
+            pdfRef={pdfRef}
+          />
+        </div>
+      )}
+
+      <EmailInvoiceModal
+        isOpen={!!emailTargetInvoice}
+        onClose={() => setEmailTargetInvoice(null)}
+        invoiceNumber={emailTargetInvoice?.invoiceNumber ?? ''}
+        customerEmail={emailTargetInvoice?.email ?? ''}
+        companyName={brand.companyName}
+        sending={emailSending}
+        onSend={handleSendEmailRow}
+      />
     </div>
   );
 }

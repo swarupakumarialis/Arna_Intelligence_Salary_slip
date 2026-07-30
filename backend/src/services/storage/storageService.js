@@ -54,6 +54,14 @@ export async function upload({ buffer, fileName, year, month }) {
   return activeProvider.uploadFile({ buffer, fileName, year, month });
 }
 
+/** Invoice PDFs (Sprint 5) — a separate Drive tree from the salary-slip
+    upload() above (see googleDriveProvider.js's uploadInvoiceFile),
+    reusing the same OAuth connection/facade shape without mixing the
+    two document types into one folder tree. */
+export async function uploadInvoice({ buffer, fileName, year }) {
+  return activeProvider.uploadInvoiceFile({ buffer, fileName, year });
+}
+
 export async function deleteFile(fileId) {
   return activeProvider.delete(fileId);
 }

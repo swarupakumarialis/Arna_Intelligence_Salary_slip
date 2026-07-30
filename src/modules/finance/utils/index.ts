@@ -1,4 +1,5 @@
 import { InvoiceItem, InvoiceTotals } from '../types';
+import { loadInvoiceSettings } from './invoiceSettingsStore';
 
 /**
  * Finance module — Invoice utilities (Sprint 3). Shared by
@@ -19,8 +20,11 @@ export function makeItemId(): string {
   return `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Sprint 7 — taxPercent defaults from Invoice Settings' configured
+    default tax percentage rather than a hardcoded 0, so a new row
+    already reflects what most items on this invoice will need. */
 export function createBlankInvoiceItem(): InvoiceItem {
-  return { id: makeItemId(), description: '', quantity: 1, unitPrice: 0, taxPercent: 0 };
+  return { id: makeItemId(), description: '', quantity: 1, unitPrice: 0, taxPercent: loadInvoiceSettings().defaultTaxPercent };
 }
 
 /** Subtotal/tax are computed per item (qty × unitPrice, and that

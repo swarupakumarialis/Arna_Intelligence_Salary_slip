@@ -1274,3 +1274,30 @@ select {
     width: 210mm;
   }
 }
+
+/* Sprint 5 — Invoice PDF/print offscreen mount. Only used by
+   InvoiceGeneratorPage's off-screen InvoicePdf instance (the Download
+   PDF capture target, and Print Invoice's native print target);
+   entirely independent of #printable-area above. Gated behind a
+   .invoice-printing class toggled on <body> right before/after
+   window.print() (see InvoiceGeneratorPage's handlePrint), so this
+   rule can never affect printing anywhere else in the app. */
+.finance-pdf-offscreen {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  pointer-events: none;
+}
+
+@media print {
+  body.invoice-printing * { visibility: hidden; }
+  body.invoice-printing #invoice-pdf-area,
+  body.invoice-printing #invoice-pdf-area * { visibility: visible; }
+  body.invoice-printing #invoice-pdf-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 210mm;
+  }
+  @page { size: A4; margin: 0; }
+}

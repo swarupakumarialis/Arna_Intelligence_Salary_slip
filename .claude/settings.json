@@ -33,7 +33,27 @@
       "Bash(curl -s -m 5 \"http://localhost:3004/src/modules/finance/invoice-history/InvoiceHistoryPage.tsx\" -o /dev/null -w \"InvoiceHistoryPage transform: %{http_code}\\\\n\")",
       "Bash(npm ls *)",
       "Bash(git status *)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(node -e ' *)",
+      "Bash(node --check src/services/email.service.js)",
+      "Bash(node --check src/models/GoogleDriveConnection.js)",
+      "Bash(curl -s -m 5 http://localhost:5001/api/invoices)",
+      "Bash(curl -s -m 5 http://localhost:5001/api/integrations/google-drive/status)",
+      "Bash(node -e *)",
+      "Bash(echo \"--- upload PDF to Drive ---\")",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices/6a6a3e8db851606e817214af/pdf -F 'pdf=@C:/Users/singh/AppData/Local/Temp/claude/c--Users-singh-Downloads-salary-slip-generator-master-salary-slip-generator-master/479a4254-5581-4d72-966c-1a432b2feaf5/scratchpad/test-invoice.pdf;type=application/pdf')",
+      "Bash(echo)",
+      "Bash(echo \"--- email invoice ---\")",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices/6a6a3e8db851606e817214af/email -F 'pdf=@C:/Users/singh/AppData/Local/Temp/claude/c--Users-singh-Downloads-salary-slip-generator-master-salary-slip-generator-master/479a4254-5581-4d72-966c-1a432b2feaf5/scratchpad/test-invoice.pdf;type=application/pdf' -F recipientEmail=test@example.com -F 'companyName=Test Co')",
+      "Bash(curl -s -m 5 http://localhost:5001/api/health -w \"\\\\nHTTP:%{http_code}\\\\n\")",
+      "Bash(disown)",
+      "Bash(curl -s http://localhost:5001/api/invoices/6a6a3e8db851606e817214af -w '\\\\nHTTP:%{http_code}\\\\n')",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices/6a6a3e8db851606e817214af/pdf -F 'pdf=@C:/Users/singh/AppData/Local/Temp/claude/c--Users-singh-Downloads-salary-slip-generator-master-salary-slip-generator-master/479a4254-5581-4d72-966c-1a432b2feaf5/scratchpad/test-invoice.pdf;type=application/pdf' -w '\\\\nHTTP:%{http_code}\\\\n')",
+      "Bash(curl -s \"http://localhost:5001/api/invoices\" -w \"\\\\nHTTP:%{http_code}\\\\n\")",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices/6a6a40ceb851606e817214be/pdf -F 'pdf=@C:/Users/singh/AppData/Local/Temp/claude/c--Users-singh-Downloads-salary-slip-generator-master-salary-slip-generator-master/479a4254-5581-4d72-966c-1a432b2feaf5/scratchpad/test-invoice.pdf;type=application/pdf' -w '\\\\nHTTP:%{http_code}\\\\n')",
+      "Bash(curl -s -X POST http://localhost:5001/api/invoices/6a6a40ceb851606e817214be/email -F 'pdf=@C:/Users/singh/AppData/Local/Temp/claude/c--Users-singh-Downloads-salary-slip-generator-master-salary-slip-generator-master/479a4254-5581-4d72-966c-1a432b2feaf5/scratchpad/test-invoice.pdf;type=application/pdf' -F recipientEmail=sprint5-test@example.com -F 'companyName=Test Co' -w '\\\\nHTTP:%{http_code}\\\\n')",
+      "Bash(curl -s \"http://localhost:5001/api/invoices/6a6a40ceb851606e817214be\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\('emailStatus:',j.data.emailStatus,'emailRecipient:',j.data.emailRecipient\\)}\\)\")"
     ]
   }
 }

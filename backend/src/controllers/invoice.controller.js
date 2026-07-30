@@ -1,5 +1,6 @@
 import * as invoiceService from '../services/invoice.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
 
 /**
  * Thin HTTP layer only — same division of responsibility as
@@ -50,4 +51,25 @@ export const updateInvoice = asyncHandler(async (req, res) => {
 export const deleteInvoice = asyncHandler(async (req, res) => {
   await invoiceService.deleteInvoice(req.params.id);
   res.status(200).json({ success: true, message: 'Invoice deleted successfully', data: null });
+});
+
+/** Sprint 5, Part 5 — the frontend sends the exact PDF bytes it just
+    generated (html2canvas + jsPDF, see the Invoice module's own
+    generateInvoicePdf.ts), same "never re-derive on the server"
+    principle as the Salary PDF's upload/email flow. */
+export const uploadInvoicePdf = asyncHandler(async (req, res) => {
+  if (!req.file) throw new AppError('No PDF file was uploaded', 400);
+  const data = await invoiceService.attachInvoicePdf(req.params.id, req.file.buffer);
+  res.status(200).json({ success: true, message: 'Invoice PDF uploaded to Google Drive', data });
+});
+
+export const emailInvoice = asyncHandler(async (req, res) => {
+  if (!req.file) throw new AppError('No PDF attachment was uploaded', 400, 'attachment');
+  const data = await invoiceService.emailInvoicePdf(req.params.id, {
+    recipientEmail: req.body.recipientEmail,
+    subject: req.body.subject,
+    companyName: req.body.companyName,
+    buffer: req.file.buffer,
+  });
+  res.status(200).json({ success: true, message: 'Invoice emailed successfully', data });
 });

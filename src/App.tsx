@@ -47,6 +47,7 @@ const TaxCenterPage = lazy(() => import('./pages/TaxCenterPage').then(m => ({ de
 // placeholders) rather than another Payroll destination.
 const InvoiceGeneratorPage = lazy(() => import('./modules/finance/invoice-generator/InvoiceGeneratorPage').then(m => ({ default: m.InvoiceGeneratorPage })));
 const InvoiceHistoryPage = lazy(() => import('./modules/finance/invoice-history/InvoiceHistoryPage').then(m => ({ default: m.InvoiceHistoryPage })));
+const InvoiceSettingsPage = lazy(() => import('./modules/finance/invoice-settings/InvoiceSettingsPage').then(m => ({ default: m.InvoiceSettingsPage })));
 
 function PageLoadingFallback() {
   return (
@@ -1303,6 +1304,14 @@ export default function App() {
             <div className="page-container app-page">
               <Suspense fallback={<PageLoadingFallback />}>
                 <InvoiceHistoryPage onOpenInvoice={openInvoice} />
+              </Suspense>
+            </div>
+          )}
+
+          {activePage === 'invoice-settings' && (
+            <div className="page-container app-page">
+              <Suspense fallback={<PageLoadingFallback />}>
+                <InvoiceSettingsPage />
               </Suspense>
             </div>
           )}

@@ -12,7 +12,7 @@ import type { CurrencyCode } from '../../../utils/currencyService';
 export const PAYMENT_TERMS = ['Due on Receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'] as const;
 export type PaymentTerm = (typeof PAYMENT_TERMS)[number];
 
-export const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'] as const;
+export const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Partially Paid', 'Overdue', 'Cancelled'] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 export interface CustomerDetails {
@@ -72,6 +72,21 @@ export interface Invoice extends CustomerDetails, InvoiceDetails {
   items: InvoiceItem[];
   discount: number;
   notes: string;
+  /** Sprint 7 — snapshotted from Invoice Settings' default at create
+      time, editable thereafter. Optional/additive: invoices created
+      before this sprint simply read as ''; the footer falls back to
+      the live Invoice Settings default when empty (see
+      InvoiceFooter.tsx/InvoicePdfFooter.tsx). */
+  termsAndConditions: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Sprint 5 — Google Drive archive + email-send state, set by
+      services/invoiceApi.ts's uploadInvoicePdf/emailInvoice. Null until
+      the corresponding action has been run at least once. */
+  driveFileId?: string | null;
+  driveFileUrl?: string | null;
+  pdfGeneratedAt?: string | null;
+  emailStatus?: 'Pending' | 'Sent' | 'Failed' | null;
+  emailSentAt?: string | null;
+  emailRecipient?: string | null;
 }
