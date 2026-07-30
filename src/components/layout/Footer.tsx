@@ -40,7 +40,7 @@ const footerLinks: { services: FooterLink[]; company: FooterLink[]; products: Fo
 
 const columnTitleStyle: React.CSSProperties = {
   fontSize: 12.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em',
-  marginBottom: 18, color: '#fff',
+  marginBottom: 10, color: '#fff',
 };
 
 const linkStyle: React.CSSProperties = {
@@ -49,7 +49,7 @@ const linkStyle: React.CSSProperties = {
 
 function FooterLinkList({ links }: { links: FooterLink[] }) {
   return (
-    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 15 }}>
+    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
       {links.map(link => (
         <li key={link.name}>
           {link.href ? (
@@ -81,25 +81,25 @@ function FooterLinkList({ links }: { links: FooterLink[] }) {
 export function Footer() {
   return (
     <footer style={{ background: 'var(--arna-navy)', color: '#fff' }}>
-      <div style={{ maxWidth: 1360, margin: '0 auto', padding: '48px 32px' }}>
+      <div style={{ maxWidth: 1360, margin: '0 auto', padding: '31px 32px' }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(0, 280px) repeat(3, minmax(0, 200px)) minmax(0, 260px)',
           justifyContent: 'space-between',
-          rowGap: 40, columnGap: 24,
+          rowGap: 25, columnGap: 24,
         }}
         className="footer-grid"
         >
           {/* Brand */}
           <div style={{ maxWidth: 280, minWidth: 0 }}>
             <a href="/" style={{ display: 'inline-block' }}>
-              <img src={footerLogo} alt="Arna Intelligence" style={{ height: 100, width: 'auto', maxWidth: 280, objectFit: 'contain' }} />
+              <img src={footerLogo} alt="Arna Intelligence" style={{ height: 63, width: 'auto', maxWidth: 280, objectFit: 'contain' }} />
             </a>
-            <p style={{ marginTop: 16, fontSize: 13, color: 'rgba(255,255,255,0.9)', lineHeight: 1.6, maxWidth: 260 }}>
+            <p style={{ marginTop: 10, fontSize: 13, color: 'rgba(255,255,255,0.9)', lineHeight: 1.35, maxWidth: 260 }}>
               Grounded in learning science. Accelerated by AI systems. Humanized through experience design. Creating
               connected learning ecosystems that deliver measurable business outcomes.
             </p>
-            <p style={{ marginTop: 18, fontSize: 13, fontWeight: 600, color: 'var(--arna-accent)' }}>
+            <p style={{ marginTop: 10, fontSize: 13, fontWeight: 600, color: 'var(--arna-accent)' }}>
               Where Learning Meets Intelligence.
             </p>
           </div>
@@ -125,7 +125,7 @@ export function Footer() {
           {/* Address */}
           <div style={{ minWidth: 0 }}>
             <h3 style={columnTitleStyle}>Address</h3>
-            <div style={{ fontSize: 13, color: '#fff', lineHeight: 1.9 }}>
+            <div style={{ fontSize: 13, color: '#fff', lineHeight: 1.3 }}>
               <p style={{ margin: 0 }}>Plot No: 802 &amp; 803,</p>
               <p style={{ margin: 0 }}>Ayyappa Society,</p>
               <p style={{ margin: 0 }}>Madhapur,</p>
@@ -133,7 +133,7 @@ export function Footer() {
             </div>
             <a
               href="mailto:info_arnaintelligence@alis-global.com"
-              style={{ ...linkStyle, display: 'block', marginTop: 12, wordBreak: 'break-word' }}
+              style={{ ...linkStyle, display: 'block', marginTop: 7, wordBreak: 'break-word' }}
               onMouseEnter={e => { e.currentTarget.style.color = 'var(--arna-accent)'; }}
               onMouseLeave={e => { e.currentTarget.style.color = '#fff'; }}
             >
@@ -142,7 +142,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div style={{ marginTop: 40, paddingTop: 24, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 22, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', textAlign: 'center', margin: 0 }}>
             &copy; 2026 Arnas Learning Intelligence Studio Pvt. Ltd. All rights reserved.
           </p>
