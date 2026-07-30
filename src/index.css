@@ -909,7 +909,8 @@ select {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ============================================================
-   SPRINT 4 — LOGIN SCREEN
+   LOGIN SCREEN — two-panel layout: branded marketing panel (left,
+   hidden below --login-breakpoint) + sign-in form (right).
    ============================================================ */
 .login-screen {
   height: 100%;
@@ -918,20 +919,169 @@ select {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  overflow: auto;
+  /* Bolder brand-colour wash behind the card — three overlapping
+     radial highlights (mint top-left, teal centre-right, navy bottom-
+     right) over a full-bleed diagonal gradient running edge to edge,
+     rather than the plain off-white background the card used to float
+     on. Still light enough that the white right panel reads as the
+     clear focal point, but the page itself no longer looks flat. */
   background:
-    radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--brand-secondary) 18%, transparent), transparent 45%),
-    radial-gradient(circle at 85% 85%, color-mix(in srgb, var(--brand-primary) 14%, transparent), transparent 50%),
-    var(--clr-bg);
+    radial-gradient(circle at 10% 10%, color-mix(in srgb, var(--arna-mint) 48%, transparent), transparent 45%),
+    radial-gradient(circle at 75% 30%, color-mix(in srgb, var(--arna-teal) 32%, transparent), transparent 50%),
+    radial-gradient(circle at 90% 95%, color-mix(in srgb, var(--arna-navy) 40%, transparent), transparent 55%),
+    linear-gradient(150deg, color-mix(in srgb, var(--arna-teal) 22%, var(--clr-bg)) 0%, color-mix(in srgb, var(--arna-mint) 14%, var(--clr-bg)) 45%, var(--clr-bg) 85%);
+}
+
+.login-shell {
+  width: 100%;
+  max-width: 1180px;
+  min-height: 620px;
+  display: flex;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  background: var(--clr-surface);
+}
+
+/* ── Left panel — branding + feature highlights ── */
+.login-panel-left {
+  flex: 1 1 50%;
+  position: relative;
+  overflow: hidden;
+  padding: 40px 46px;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  background: linear-gradient(150deg, var(--arna-teal) 0%, #0F3D3A 42%, #0B2027 100%);
+}
+
+.login-panel-left::before,
+.login-panel-left::after {
+  content: '';
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  background-image: radial-gradient(circle, color-mix(in srgb, #fff 22%, transparent) 1.5px, transparent 1.5px);
+  background-size: 14px 14px;
+  pointer-events: none;
+}
+.login-panel-left::before { top: 26px; right: 26px; }
+.login-panel-left::after { bottom: 26px; left: 26px; opacity: 0.5; }
+
+.login-left-logo {
+  position: relative;
+  z-index: 1;
+  width: 190px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  color: #fff;
+  margin-bottom: 30px;
+  flex-shrink: 0;
+}
+.login-left-logo img { width: 100%; height: 100%; object-fit: contain; object-position: left center; }
+
+.login-left-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+}
+
+.login-left-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--arna-mint) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--arna-mint) 32%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--arna-mint);
+}
+
+.login-left-heading {
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  margin: 2px 0 0;
+}
+
+.login-left-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: color-mix(in srgb, #fff 78%, transparent);
+  max-width: 420px;
+  margin: 0;
+}
+
+.login-feature-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-feature-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.login-feature-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, #fff 10%, transparent);
+  color: var(--arna-mint);
+}
+
+.login-feature-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 2px;
+}
+
+.login-feature-desc {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, #fff 65%, transparent);
+  margin: 0;
+}
+
+/* ── Right panel — the actual sign-in form ── */
+.login-panel-right {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: var(--clr-surface);
+}
+
+@media (max-width: 900px) {
+  .login-panel-left { display: none; }
+  .login-shell { max-width: 460px; min-height: 0; }
+  .login-panel-right { padding: 32px 24px; }
 }
 
 .login-card {
   width: 100%;
   max-width: 380px;
-  background: var(--clr-surface);
-  border: 1px solid var(--clr-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 34px 30px 26px;
 }
 
 .login-brand {
@@ -945,8 +1095,8 @@ select {
 .login-brand-logo {
   /* Wide box — matches the logo artwork's real aspect ratio, see
      .app-topnav-logo for the same reasoning. */
-  width: 248px;
-  height: 78px;
+  width: 220px;
+  height: 70px;
   color: var(--brand-primary);
   display: flex;
   align-items: center;
@@ -1025,12 +1175,29 @@ select {
   font-size: 13px;
 }
 
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--clr-text-subtle);
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--clr-border);
+}
+
 .login-footer-note {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin: 22px 0 0;
+  margin: 16px 0 0;
   font-size: 11px;
   color: var(--clr-text-subtle);
   font-weight: 500;

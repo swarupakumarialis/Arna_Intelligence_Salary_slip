@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, User, Lock, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
+import { Building2, User, Lock, Eye, EyeOff, Loader2, ShieldCheck, Sparkles, Clock3, Users, Cloud } from 'lucide-react';
 
 interface Props {
   onLogin: (username: string, password: string) => boolean;
@@ -7,12 +7,26 @@ interface Props {
   logoDataUri?: string | null;
 }
 
+const FEATURES = [
+  { icon: ShieldCheck, title: 'Secure & Compliant', desc: 'Advanced security to keep your data safe.' },
+  { icon: Clock3, title: 'Save Time', desc: 'Automate payroll & invoicing in seconds.' },
+  { icon: Users, title: 'Team Access', desc: 'Role-based access for your HR and finance team.' },
+  { icon: Cloud, title: 'Anywhere Access', desc: 'Access your payroll anytime, anywhere.' },
+];
+
 /**
  * Full-screen login gate rendered by ProtectedRoute whenever there's
  * no active session. Purely a UI shell around useAuth().login() — it
  * has no idea whether that call checks a static config (today) or
  * hits a real API (after a JWT/MongoDB migration); it only cares about
  * the boolean result.
+ *
+ * Two-panel layout: a branded marketing panel on the left (hidden on
+ * narrow viewports, see .login-panel-left's media query) and the
+ * actual sign-in form on the right. `appName`/`logoDataUri` stay the
+ * only white-label inputs — the marketing copy references `appName`
+ * directly rather than hardcoding a company name, so a differently-
+ * branded deployment reads correctly without any code change.
  */
 export function LoginPage({ onLogin, appName = 'Arna Intelligence IntelliPayRoll', logoDataUri }: Props) {
   const [username, setUsername] = useState('');
@@ -45,72 +59,104 @@ export function LoginPage({ onLogin, appName = 'Arna Intelligence IntelliPayRoll
 
   return (
     <div className="login-screen">
-      <div className="login-card animate-fade-in-up">
-        <div className="login-brand">
-          <div className="login-brand-logo">
-            {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={34} />}
+      <div className="login-shell animate-fade-in-up">
+        <div className="login-panel-left">
+          <div className="login-left-logo">
+            {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={30} />}
           </div>
-          <div className="login-brand-title">{appName}</div>
-          <div className="login-brand-subtitle">Payroll Management</div>
+
+          <div className="login-left-content">
+            <span className="login-left-badge"><Sparkles size={12} /> Payroll Management, Simplified</span>
+            <h1 className="login-left-heading">Smart Payroll.<br />Seamless Experience.</h1>
+            <p className="login-left-desc">
+              {appName} helps you automate payroll, ensure compliance, and empower your team with accuracy and ease.
+            </p>
+
+            <ul className="login-feature-list">
+              {FEATURES.map(({ icon: Icon, title, desc }) => (
+                <li key={title} className="login-feature-item">
+                  <span className="login-feature-icon"><Icon size={18} /></span>
+                  <div>
+                    <p className="login-feature-title">{title}</p>
+                    <p className="login-feature-desc">{desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="login-form" noValidate>
-          <div>
-            <label className="field-label" htmlFor="login-username">Username</label>
-            <div className="login-input-wrap">
-              <User size={15} className="login-input-icon" />
-              <input
-                id="login-username"
-                className="field"
-                style={{ paddingLeft: 34 }}
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                autoFocus
-                autoComplete="username"
-                disabled={submitting}
-              />
+        <div className="login-panel-right">
+          <div className="login-card">
+            <div className="login-brand">
+              <div className="login-brand-logo">
+                {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={34} />}
+              </div>
+              <div className="login-brand-title">{appName}</div>
+              <div className="login-brand-subtitle">Payroll Management</div>
             </div>
-          </div>
 
-          <div>
-            <label className="field-label" htmlFor="login-password">Password</label>
-            <div className="login-input-wrap">
-              <Lock size={15} className="login-input-icon" />
-              <input
-                id="login-password"
-                className="field"
-                style={{ paddingLeft: 34, paddingRight: 38 }}
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                disabled={submitting}
-              />
-              <button
-                type="button"
-                className="login-toggle-visibility"
-                onClick={() => setShowPassword(v => !v)}
-                tabIndex={-1}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            <form onSubmit={handleSubmit} className="login-form" noValidate>
+              <div>
+                <label className="field-label" htmlFor="login-username">Username</label>
+                <div className="login-input-wrap">
+                  <User size={15} className="login-input-icon" />
+                  <input
+                    id="login-username"
+                    className="field"
+                    style={{ paddingLeft: 34 }}
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="Enter your username"
+                    autoFocus
+                    autoComplete="username"
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="login-password">Password</label>
+                <div className="login-input-wrap">
+                  <Lock size={15} className="login-input-icon" />
+                  <input
+                    id="login-password"
+                    className="field"
+                    style={{ paddingLeft: 34, paddingRight: 38 }}
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    autoComplete="current-password"
+                    disabled={submitting}
+                  />
+                  <button
+                    type="button"
+                    className="login-toggle-visibility"
+                    onClick={() => setShowPassword(v => !v)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              {error && <div className="login-error">{error}</div>}
+
+              <button type="submit" className="btn btn-dark login-submit" disabled={submitting}>
+                {submitting && <Loader2 size={14} className="animate-spin" />}
+                {submitting ? 'Signing in…' : 'Sign In'}
               </button>
-            </div>
+            </form>
+
+            <div className="login-divider"><span>or</span></div>
+
+            <p className="login-footer-note">
+              <ShieldCheck size={12} /> Secured payroll access · Authorised personnel only
+            </p>
           </div>
-
-          {error && <div className="login-error">{error}</div>}
-
-          <button type="submit" className="btn btn-dark login-submit" disabled={submitting}>
-            {submitting && <Loader2 size={14} className="animate-spin" />}
-            {submitting ? 'Signing in…' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="login-footer-note">
-          <ShieldCheck size={12} /> Secured payroll access · Authorised personnel only
-        </p>
+        </div>
       </div>
     </div>
   );
