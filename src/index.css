@@ -517,6 +517,26 @@ select {
   min-width: 0;
 }
 
+.app-topnav-sidebar-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--clr-border);
+  background: var(--clr-surface);
+  color: var(--clr-text-muted);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.app-topnav-sidebar-toggle:hover {
+  background: var(--clr-hover);
+  color: var(--brand-primary);
+  border-color: var(--clr-border-hover);
+}
+
 .app-topnav-logo {
   /* Wide box — matches the logo artwork's real aspect ratio (a
      horizontal icon + wordmark lockup, not a square mark), so
@@ -588,6 +608,19 @@ select {
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  transition: width var(--transition), padding var(--transition);
+}
+
+/* Manual full collapse (TopNav's sidebar-toggle button) — width to 0
+   rather than display:none, so the transition above actually animates
+   instead of the rail disappearing instantly. Independent of, and
+   layered on top of, the <=900px icon-only auto-collapse below. */
+.app-sidebar.collapsed {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border: none;
+  overflow: hidden;
 }
 
 .sidebar-link {

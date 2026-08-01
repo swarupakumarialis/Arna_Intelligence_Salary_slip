@@ -278,6 +278,8 @@ function SalaryRow({ item, onNameChange, onAmountChange, onRemove, onBlurName, o
             placeholder="Component name"
             value={item.name}
             readOnly={locked}
+            maxLength={60}
+            title="Maximum 60 characters"
             onChange={e => onNameChange(e.target.value)}
             style={{
               flex: 1,

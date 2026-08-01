@@ -1,6 +1,6 @@
 import React from 'react';
 import { InvoiceTotals } from '../../types';
-import { CurrencyCode, formatAmount } from '../../../../utils/currencyService';
+import { CurrencyCode, amountToWords, formatAmount } from '../../../../utils/currencyService';
 
 interface Props {
   totals: InvoiceTotals;
@@ -45,6 +45,20 @@ export function InvoiceSummary({ totals, currency, accentColor }: Props) {
         </span>
         <span style={{ fontSize: 16, fontWeight: 800, color: '#ffffff', fontVariantNumeric: 'tabular-nums' }}>
           {fmt(totals.grandTotal)}
+        </span>
+      </div>
+      {/* Amount in Words — same bordered label+value strip convention
+          as the Salary payslip's "Amount in Words" (SalarySlipPreview.tsx),
+          rather than a small italic caption easy to miss. */}
+      <div style={{
+        marginTop: 8, border: '1px solid #E2E8F0', borderRadius: 6, padding: '8px 12px',
+        display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94A3B8', flexShrink: 0 }}>
+          Amount in Words
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#1F2937', lineHeight: 1.4 }}>
+          {amountToWords(totals.grandTotal, currency)}
         </span>
       </div>
     </div>

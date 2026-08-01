@@ -11,7 +11,7 @@ import { CURRENCY_CODES, CURRENCY_META, CurrencyCode, formatAmount } from '../..
 import { loadCompanySettings } from '../../../utils/companySettingsStore';
 import { loadInvoiceSettings } from '../utils/invoiceSettingsStore';
 import {
-  CustomerDetails, InvoiceDetails, InvoiceItem, InvoiceStatus, PAYMENT_TERMS, INVOICE_STATUSES,
+  CustomerDetails, Invoice, InvoiceDetails, InvoiceItem, InvoiceStatus, PAYMENT_TERMS, INVOICE_STATUSES,
 } from '../types';
 import { computeInvoiceTotals, createBlankInvoiceItem, todayIso } from '../utils';
 import { ApiError, createInvoice, emailInvoice, getInvoice, updateInvoice, uploadInvoicePdf } from '../services/invoiceApi';
@@ -30,11 +30,28 @@ import { generateInvoicePdf } from './pdf/generateInvoicePdf';
 export interface InvoiceOpenRequest {
   id: string;
   mode: 'edit' | 'view';
+  /** When the caller already has the full record in hand — Invoice
+      History's rows are already fetched in full, and its Preview modal
+      already holds the exact invoice being viewed — pass it here so
+      opening Edit/View skips a redundant GET /invoices/:id round-trip.
+      This is what used to make "click pencil in Invoice History" show
+      a "Loading invoice…" spinner for however long that request took,
+      for data the caller already had on screen a moment earlier.
+      Optional so a caller with only an id (none currently) still works
+      via the fetch-by-id fallback below. */
+  invoice?: Invoice;
 }
 
 interface Props {
   openRequest?: InvoiceOpenRequest | null;
   onOpenRequestHandled?: () => void;
+  /** Fires whenever "does this form have changes that would be lost if
+      the user navigated away right now" flips — App.tsx uses this to
+      warn before switching the sidebar to another page, since this
+      component (and all its local state) unmounts on navigation away
+      from 'invoice-generator', unlike the Salary Generator whose form
+      state lives in App.tsx and survives a page switch. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -93,6 +110,19 @@ function errorFieldStyle(error?: string): React.CSSProperties | undefined {
   return error ? { borderColor: '#FCA5A5', boxShadow: '0 0 0 3px rgba(220,38,38,0.10)' } : undefined;
 }
 
+/** Visible "42/200" counter for fields given a maxLength — shown next
+    to the label rather than only relying on the browser's silent
+    HTML maxLength enforcement, so the limit is mentioned in the UI
+    itself, not just discovered by hitting it. Turns red once the
+    field is actually at its limit. */
+function CharCounter({ length, max }: { length: number; max: number }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, color: length >= max ? '#DC2626' : 'var(--clr-text-subtle)' }}>
+      {length}/{max}
+    </span>
+  );
+}
+
 interface FieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: string;
   hint?: string;
@@ -107,11 +137,15 @@ interface FieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
     too. */
 const Field: React.FC<FieldProps> = ({ label, hint, error, required, id, style, ...props }) => {
   const errorId = error && id ? `${id}-error` : undefined;
+  const hasCounter = typeof props.maxLength === 'number' && typeof props.value === 'string';
   return (
     <div>
-      <label style={labelStyle} htmlFor={id}>
-        {label}{required && <span style={{ color: '#DC2626', marginLeft: 3 }} aria-hidden="true">*</span>}
-      </label>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+        <label style={{ ...labelStyle, marginBottom: 0 }} htmlFor={id}>
+          {label}{required && <span style={{ color: '#DC2626', marginLeft: 3 }} aria-hidden="true">*</span>}
+        </label>
+        {hasCounter && <CharCounter length={(props.value as string).length} max={props.maxLength as number} />}
+      </div>
       <input
         {...props}
         id={id}
@@ -141,9 +175,13 @@ function TextAreaField({
   label, error, id, style, ...props
 }: { label: string; error?: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const errorId = error && id ? `${id}-error` : undefined;
+  const hasCounter = typeof props.maxLength === 'number' && typeof props.value === 'string';
   return (
     <div>
-      <label style={labelStyle} htmlFor={id}>{label}</label>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+        <label style={{ ...labelStyle, marginBottom: 0 }} htmlFor={id}>{label}</label>
+        {hasCounter && <CharCounter length={(props.value as string).length} max={props.maxLength as number} />}
+      </div>
       <textarea
         {...props} id={id} className="field"
         aria-invalid={error ? true : undefined}
@@ -210,8 +248,12 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, index, currency, removeDisabled
           onChange={e => onChange({ description: e.target.value })}
           onFocus={onFocusStyle} onBlur={e => { clearFocusStyle(e, errors?.description); onBlurField('description'); }}
           style={{ ...cellInputStyle, ...(errors?.description ? itemErrorStyle : undefined) }}
+          maxLength={200}
         />
-        {errors?.description && <FieldError message={errors.description} />}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 3 }}>
+          <div style={{ flex: 1 }}>{errors?.description && <FieldError message={errors.description} />}</div>
+          <CharCounter length={item.description.length} max={200} />
+        </div>
       </td>
       <td style={{ padding: '8px 10px', width: 90 }}>
         <input
@@ -350,7 +392,7 @@ function validateInvoiceForm(
     if (Object.keys(rowErrors).length > 0) itemErrors[item.id] = rowErrors;
   });
   if (items.length === 0) errors.items = 'Add at least one item.';
-  else if (Object.keys(itemErrors).length > 0) errors.items = 'Fix the highlighted item row(s) below.';
+  else if (Object.keys(itemErrors).length > 0) errors.items = 'Fix the highlighted item.';
 
   return { errors, itemErrors };
 }
@@ -361,7 +403,7 @@ function validateInvoiceForm(
     View mode just locks the form visually and swaps the footer actions
     for a single "Edit Invoice" button; Edit mode is Create's same
     save flow, routed to PUT instead of POST because `savedId` is set. */
-export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Props = {}) {
+export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled, onDirtyChange }: Props = {}) {
   const [customer, setCustomer] = useState<CustomerDetails>(emptyCustomerDetails);
   const [invoice, setInvoice] = useState<InvoiceDetails>(defaultInvoiceDetails);
   const [items, setItems] = useState<InvoiceItem[]>([createBlankInvoiceItem()]);
@@ -421,6 +463,29 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
   const addItem = () => setItems(prev => [...prev, createBlankInvoiceItem()]);
   const removeItem = (id: string) => setItems(prev => (prev.length > 1 ? prev.filter(item => item.id !== id) : prev));
 
+  /** Snapshot of everything a save actually persists (payload shape,
+      not UI-only state like `touched`/`mode`) — compared against the
+      live form on every render to decide whether there are unsaved
+      changes. Baselined on mount (blank form = "clean"), then
+      re-baselined after a successful load or save; see the effect and
+      the two spots below that reassign `savedSnapshotRef.current`. */
+  const serializeFormState = () => JSON.stringify({ customer, invoice, items, discount, notes, terms });
+  const savedSnapshotRef = useRef<string>('');
+  useEffect(() => {
+    if (!savedSnapshotRef.current) savedSnapshotRef.current = serializeFormState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const isDirty = savedSnapshotRef.current !== '' && serializeFormState() !== savedSnapshotRef.current;
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty]);
+  /* Tells App.tsx there's nothing left to lose right before unmount —
+     without this, closing the tab/switching pages right after a fresh
+     "Form cleared" or a load that hasn't diverged yet would otherwise
+     rely on a stale `true` from the render just before this one. */
+  useEffect(() => () => { onDirtyChange?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const showNotice = (message: string) => {
     setNotice(message);
     setTimeout(() => setNotice(null), 4000);
@@ -459,11 +524,14 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
   };
 
   const handleClear = () => {
-    setCustomer(emptyCustomerDetails());
-    setInvoice(defaultInvoiceDetails());
-    setItems([createBlankInvoiceItem()]);
-    setDiscount(0);
+    const blankCustomer = emptyCustomerDetails();
+    const blankInvoice = defaultInvoiceDetails();
+    const blankItems = [createBlankInvoiceItem()];
     const settings = loadInvoiceSettings();
+    setCustomer(blankCustomer);
+    setInvoice(blankInvoice);
+    setItems(blankItems);
+    setDiscount(0);
     setNotes(settings.defaultNotes);
     setTerms(settings.defaultTerms);
     setMode('create');
@@ -475,42 +543,71 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
     setTouched({});
     setItemsTouched({});
     setSubmitAttempted(false);
+    savedSnapshotRef.current = JSON.stringify({
+      customer: blankCustomer, invoice: blankInvoice, items: blankItems,
+      discount: 0, notes: settings.defaultNotes, terms: settings.defaultTerms,
+    });
     showNotice('Form cleared.');
+  };
+
+  /** Populates every piece of form state from a fetched-or-already-had
+      Invoice record and re-baselines the dirty-tracking snapshot.
+      Shared by both branches of the effect below — the network fetch
+      and the pre-fetched fast path — so they can never drift apart. */
+  const applyLoadedInvoice = (inv: Invoice, mode: 'edit' | 'view') => {
+    const loadedCustomer = {
+      customerName: inv.customerName, companyName: inv.companyName, email: inv.email,
+      phone: inv.phone, gstin: inv.gstin, billingAddress: inv.billingAddress,
+    };
+    const loadedInvoice = {
+      invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, paymentTerms: inv.paymentTerms,
+      currency: inv.currency, status: inv.status,
+    };
+    const loadedItems = inv.items.length ? inv.items : [createBlankInvoiceItem()];
+    setCustomer(loadedCustomer);
+    setInvoice(loadedInvoice);
+    setItems(loadedItems);
+    setDiscount(inv.discount);
+    setNotes(inv.notes);
+    setTerms(inv.termsAndConditions);
+    setSavedId(inv.id);
+    setInvoiceNumber(inv.invoiceNumber);
+    setDriveFileUrl(inv.driveFileUrl ?? null);
+    setEmailStatusValue(inv.emailStatus ?? null);
+    setTouched({});
+    setItemsTouched({});
+    savedSnapshotRef.current = JSON.stringify({
+      customer: loadedCustomer, invoice: loadedInvoice, items: loadedItems,
+      discount: inv.discount, notes: inv.notes, terms: inv.termsAndConditions,
+    });
+    setSubmitAttempted(false);
+    setMode(mode);
   };
 
   /* Sprint 4 Part 6/7 — View/Edit: Invoice History hands this page an
      { id, mode } request (see InvoiceOpenRequest above); it has no
      other way to say "open this saved invoice". Consumed exactly once
      via onOpenRequestHandled, which the parent uses to null the
-     request back out so re-render/re-navigation doesn't refetch. */
+     request back out so re-render/re-navigation doesn't refetch.
+     When the caller already attached the full record (Invoice History
+     always does — its rows and its Preview modal both already have it
+     in hand), apply it directly with no network round-trip and no
+     "Loading invoice…" spinner at all; only fall back to fetching by id
+     when a future caller opens Edit/View with just an id. */
   useEffect(() => {
     if (!openRequest) return;
+    if (openRequest.invoice) {
+      applyLoadedInvoice(openRequest.invoice, openRequest.mode);
+      onOpenRequestHandled?.();
+      return;
+    }
     let cancelled = false;
     setLoadingRecord(true);
     setLoadError(null);
     getInvoice(openRequest.id)
       .then((inv) => {
         if (cancelled) return;
-        setCustomer({
-          customerName: inv.customerName, companyName: inv.companyName, email: inv.email,
-          phone: inv.phone, gstin: inv.gstin, billingAddress: inv.billingAddress,
-        });
-        setInvoice({
-          invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, paymentTerms: inv.paymentTerms,
-          currency: inv.currency, status: inv.status,
-        });
-        setItems(inv.items.length ? inv.items : [createBlankInvoiceItem()]);
-        setDiscount(inv.discount);
-        setNotes(inv.notes);
-        setTerms(inv.termsAndConditions);
-        setSavedId(inv.id);
-        setInvoiceNumber(inv.invoiceNumber);
-        setDriveFileUrl(inv.driveFileUrl ?? null);
-        setEmailStatusValue(inv.emailStatus ?? null);
-        setTouched({});
-        setItemsTouched({});
-        setSubmitAttempted(false);
-        setMode(openRequest.mode);
+        applyLoadedInvoice(inv, openRequest.mode);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(err instanceof ApiError ? err.message : 'Failed to load invoice.');
@@ -565,6 +662,10 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
       setInvoiceNumber(saved.invoiceNumber);
       if (statusOverride) patchInvoice({ status: statusOverride });
       setMode('edit');
+      savedSnapshotRef.current = JSON.stringify({
+        customer, invoice: { ...invoice, status: statusOverride ?? invoice.status },
+        items, discount, notes, terms,
+      });
       return saved;
     } catch (err) {
       showNotice(err instanceof ApiError ? err.message : 'Failed to save invoice. Please check your connection and try again.');
@@ -819,11 +920,12 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
                 id="invoice-customerName" label="Customer Name" required value={customer.customerName}
                 onChange={e => patchCustomer({ customerName: e.target.value })}
                 onBlur={() => markTouched('customerName')} error={shownError('customerName')}
-                placeholder="Jane Doe"
+                placeholder="Jane Doe" maxLength={100}
               />
               <Field
                 id="invoice-companyName" label="Company Name" value={customer.companyName}
                 onChange={e => patchCustomer({ companyName: e.target.value })} placeholder="Acme Pvt. Ltd."
+                maxLength={100}
               />
               <Field
                 id="invoice-email" label="Email" type="email" value={customer.email}
@@ -847,6 +949,7 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
                 <TextAreaField
                   id="invoice-billingAddress" label="Billing Address" value={customer.billingAddress}
                   onChange={e => patchCustomer({ billingAddress: e.target.value })} placeholder="Street, City, State - PIN"
+                  maxLength={300}
                 />
               </div>
             </div>
@@ -955,8 +1058,8 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
 
           <Card title="Notes & Terms" icon={<FileText size={13} />}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-              <TextAreaField id="invoice-notes" label="Notes" value={notes} onChange={e => setNotes(e.target.value)} />
-              <TextAreaField id="invoice-terms" label="Terms & Conditions" value={terms} onChange={e => setTerms(e.target.value)} />
+              <TextAreaField id="invoice-notes" label="Notes" value={notes} onChange={e => setNotes(e.target.value)} maxLength={500} />
+              <TextAreaField id="invoice-terms" label="Terms & Conditions" value={terms} onChange={e => setTerms(e.target.value)} maxLength={1000} />
             </div>
           </Card>
 
@@ -1005,7 +1108,13 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled }: Prop
           />
 
           <div className="preview-shell" ref={shellRef}>
-            {items.some(i => i.description.trim()) || customer.customerName.trim() ? (
+            {loadingRecord ? (
+              <div className="preview-empty-state">
+                <div className="preview-empty-state-icon"><Loader2 size={22} className="animate-spin" /></div>
+                <h2>Loading invoice…</h2>
+                <p>Fetching the saved invoice — the preview will appear here as soon as it's ready.</p>
+              </div>
+            ) : items.some(i => i.description.trim()) || customer.customerName.trim() ? (
               <div style={{
                 width: '100%', display: 'flex', justifyContent: 'center',
                 minHeight: `${Math.round(A4_PX_HEIGHT * previewScale)}px`, padding: '28px 0',

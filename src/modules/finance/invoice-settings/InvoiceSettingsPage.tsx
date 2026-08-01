@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Save, Loader2, Landmark, FileText, PenLine, Building2, Upload, X } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { Breadcrumb } from '../../../components/ui/Breadcrumb';
@@ -14,10 +14,31 @@ const labelStyle: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5,
 };
 
+/** Visible "42/300" counter for fields given a maxLength, mirroring
+    InvoiceGeneratorPage.tsx's own CharCounter — same reasoning: the
+    limit should be mentioned in the UI, not just silently enforced. */
+function CharCounter({ length, max }: { length: number; max: number }) {
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, color: length >= max ? '#DC2626' : 'var(--clr-text-subtle)' }}>
+      {length}/{max}
+    </span>
+  );
+}
+
+function FieldLabelRow({ label, maxLength, value }: { label: string; maxLength?: number; value?: unknown }) {
+  const hasCounter = typeof maxLength === 'number' && typeof value === 'string';
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+      <label style={{ ...labelStyle, marginBottom: 0 }}>{label}</label>
+      {hasCounter && <CharCounter length={(value as string).length} max={maxLength as number} />}
+    </div>
+  );
+}
+
 function Field({ label, hint, ...props }: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div>
-      <label style={labelStyle}>{label}</label>
+      <FieldLabelRow label={label} maxLength={props.maxLength} value={props.value} />
       <input {...props} className="field" />
       {hint && <p style={{ fontSize: 10.5, color: 'var(--clr-text-subtle)', margin: '4px 0 0' }}>{hint}</p>}
     </div>
@@ -27,7 +48,7 @@ function Field({ label, hint, ...props }: { label: string; hint?: string } & Rea
 function TextAreaFieldSmall({ label, ...props }: { label: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <div>
-      <label style={labelStyle}>{label}</label>
+      <FieldLabelRow label={label} maxLength={props.maxLength} value={props.value} />
       <textarea {...props} className="field" style={{ resize: 'vertical', minHeight: 56, fontFamily: 'inherit' }} />
     </div>
   );
@@ -36,7 +57,7 @@ function TextAreaFieldSmall({ label, ...props }: { label: string } & React.Texta
 function TextAreaField({ label, ...props }: { label: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <div>
-      <label style={labelStyle}>{label}</label>
+      <FieldLabelRow label={label} maxLength={props.maxLength} value={props.value} />
       <textarea {...props} className="field" style={{ resize: 'vertical', minHeight: 76, fontFamily: 'inherit' }} />
     </div>
   );
@@ -116,7 +137,17 @@ function ImageUpload({ label, imageUri, onChange, onError }: ImageUploadProps) {
     that's the whole point of this being editable rather than
     read-only: a different company can white-label the app to their
     own identity from this one screen. */
-export function InvoiceSettingsPage() {
+interface Props {
+  /** Fires whenever "does this page have edits that would be lost if
+      the user navigated away right now" flips — App.tsx uses this the
+      same way it uses InvoiceGeneratorPage's onDirtyChange, to warn
+      before switching the sidebar away from a page with unsaved work,
+      since this component unmounts (and its local state is lost) on
+      navigating to any other page. */
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+export function InvoiceSettingsPage({ onDirtyChange }: Props = {}) {
   const [settings, setSettings] = useState<InvoiceSettings>(loadInvoiceSettings);
   const [brand, setBrand] = useState<BrandConfig>(loadCompanySettings);
   const [saving, setSaving] = useState(false);
@@ -132,6 +163,22 @@ export function InvoiceSettingsPage() {
     setTimeout(() => setNotice(null), 4000);
   };
 
+  /* Unsaved-changes tracking (same snapshot-comparison convention as
+     InvoiceGeneratorPage.tsx) — baselined on mount, re-baselined after
+     a successful save, compared against the live {settings, brand} on
+     every render. */
+  const savedSnapshotRef = useRef<string>('');
+  useEffect(() => {
+    if (!savedSnapshotRef.current) savedSnapshotRef.current = JSON.stringify({ settings, brand });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const isDirty = savedSnapshotRef.current !== '' && JSON.stringify({ settings, brand }) !== savedSnapshotRef.current;
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty]);
+  useEffect(() => () => { onDirtyChange?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSave = () => {
     setSaving(true);
     try {
@@ -139,6 +186,7 @@ export function InvoiceSettingsPage() {
       saveInvoiceSettings(sanitized);
       setSettings(sanitized);
       saveCompanySettings(brand);
+      savedSnapshotRef.current = JSON.stringify({ settings: sanitized, brand });
       showNotice('Invoice settings saved. New invoices will use these defaults.');
     } catch {
       showNotice('Failed to save invoice settings. Please try again.', 'error');
@@ -155,12 +203,18 @@ export function InvoiceSettingsPage() {
         description="Configure numbering, defaults, and payment details that automatically populate new invoices."
       />
 
+      {/* Fixed-position toast (not an inline banner) — this page's Save
+          button sits at the bottom of a long form, so a confirmation
+          that only appeared up here near the breadcrumb would routinely
+          go unseen. This stays visible regardless of scroll position. */}
       {notice && (
         <div style={{
-          marginBottom: 16, padding: '10px 14px', borderRadius: 8,
-          background: noticeTone === 'success' ? '#F0FDFA' : '#FEF2F2',
-          border: `1px solid ${noticeTone === 'success' ? '#99F6E4' : '#FECACA'}`,
-          fontSize: 12.5, fontWeight: 600, color: noticeTone === 'success' ? '#0F766E' : '#B91C1C',
+          position: 'fixed', bottom: 24, right: 24, zIndex: 10001,
+          maxWidth: 360, padding: '12px 16px', borderRadius: 10,
+          background: noticeTone === 'success' ? '#0F766E' : '#B91C1C',
+          color: '#fff', fontSize: 12.5, fontWeight: 600,
+          boxShadow: '0 12px 32px rgba(15,23,42,0.28)',
+          display: 'flex', alignItems: 'center', gap: 8,
         }}>
           {notice}
         </div>
@@ -184,7 +238,7 @@ export function InvoiceSettingsPage() {
             <Field label="Email" type="email" value={brand.email || ''} onChange={e => patchBrand({ email: e.target.value })} placeholder="billing@company.com" />
           </div>
           <div style={{ marginTop: 14 }}>
-            <TextAreaFieldSmall label="Company Address" value={brand.companyAddress} onChange={e => patchBrand({ companyAddress: e.target.value })} placeholder="Street, City, State - PIN" />
+            <TextAreaFieldSmall label="Company Address" value={brand.companyAddress} onChange={e => patchBrand({ companyAddress: e.target.value })} placeholder="Street, City, State - PIN" maxLength={300} />
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 12, fontWeight: 500, color: 'var(--clr-text)', cursor: 'pointer' }}>
             <input
@@ -235,8 +289,8 @@ export function InvoiceSettingsPage() {
 
         <Card title="Notes & Terms" icon={<FileText size={13} />}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <TextAreaField label="Default Notes" value={settings.defaultNotes} onChange={e => patch({ defaultNotes: e.target.value })} />
-            <TextAreaField label="Default Terms & Conditions" value={settings.defaultTerms} onChange={e => patch({ defaultTerms: e.target.value })} />
+            <TextAreaField label="Default Notes" value={settings.defaultNotes} onChange={e => patch({ defaultNotes: e.target.value })} maxLength={500} />
+            <TextAreaField label="Default Terms & Conditions" value={settings.defaultTerms} onChange={e => patch({ defaultTerms: e.target.value })} maxLength={1000} />
           </div>
         </Card>
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { InvoiceTotals } from '../../types';
-import { CurrencyCode, formatAmount } from '../../../../utils/currencyService';
+import { CurrencyCode, amountToWords, formatAmount } from '../../../../utils/currencyService';
 
 interface Props {
   totals: InvoiceTotals;
@@ -33,6 +33,19 @@ export function InvoicePdfSummary({ totals, currency, accentColor }: Props) {
       <Row label="Round Off" value={fmt(totals.roundOff)} />
       <div style={{ borderTop: `1.5px solid ${accentColor}`, marginTop: 5 }}>
         <Row label="Grand Total" value={fmt(totals.grandTotal)} emphasis valueColor={accentColor} />
+      </div>
+      {/* Amount in Words — same bordered label+value strip convention as
+          the Salary payslip PDF's "Amount in Words" (SalarySlipPDF.tsx). */}
+      <div style={{
+        marginTop: 6, border: '1px solid #E2E8F0', borderRadius: 4, padding: '6px 10px',
+        display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94A3B8', flexShrink: 0 }}>
+          Amount in Words
+        </span>
+        <span style={{ fontSize: '8.5pt', fontWeight: 600, color: '#1F2937' }}>
+          {amountToWords(totals.grandTotal, currency)}
+        </span>
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ const th: React.CSSProperties = {
 };
 const td: React.CSSProperties = {
   padding: '10px 12px', fontSize: 11, color: '#1F2937', verticalAlign: 'top',
+  wordBreak: 'break-word', overflowWrap: 'anywhere',
 };
 
 /** Read-only mirror of the form's Items table — same columns, same

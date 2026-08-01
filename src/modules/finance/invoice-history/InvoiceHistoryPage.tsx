@@ -1,7 +1,8 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Eye, Pencil, Copy, Trash2, History, ChevronLeft, ChevronRight, Loader2,
-  Download, Printer, Mail, ExternalLink, Cloud,
+  Download, Printer, Mail, ExternalLink, Cloud, X, MoreHorizontal,
 } from 'lucide-react';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { Breadcrumb } from '../../../components/ui/Breadcrumb';
@@ -38,10 +39,43 @@ const SORT_OPTIONS: { value: InvoiceSort; label: string }[] = [
 interface Props {
   /** Invoice History has no built-in way to "navigate" to the
       Generator (no URL router in this app) — App.tsx passes this
-      callback down and lifts the resulting { id, mode } request to
-      InvoiceGeneratorPage itself (see InvoiceGeneratorPage's
-      InvoiceOpenRequest prop). */
-  onOpenInvoice: (id: string, mode: 'edit' | 'view') => void;
+      callback down and lifts the resulting { id, mode, invoice } request
+      to InvoiceGeneratorPage itself (see InvoiceGeneratorPage's
+      InvoiceOpenRequest prop). The optional third argument is the row's
+      already-fetched Invoice — always passed here — so the Generator
+      can skip its own GET /invoices/:id and open instantly instead of
+      showing "Loading invoice…" for data History already had. */
+  onOpenInvoice: (id: string, mode: 'edit' | 'view', invoice?: Invoice) => void;
+}
+
+const menuItemStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+  padding: '8px 12px', border: 'none', background: 'transparent',
+  fontSize: 12.5, fontWeight: 600, color: 'var(--clr-text)',
+  textAlign: 'left', cursor: 'pointer', borderRadius: 8,
+};
+
+/** One row of the per-invoice "More actions" menu — same visual
+    language as ExportShareDropdown.tsx's menu items, reused here so the
+    Actions column's row of up to 9 icons (Preview/Edit/Download/Print/
+    Email/Open PDF/Drive/Duplicate/Delete) collapses down to just
+    Preview, Edit and a single "More" trigger. */
+function MenuItem({ icon: Icon, label, onClick, disabled, danger }: {
+  icon: React.ComponentType<{ size?: number }>; label: string; onClick: () => void; disabled?: boolean; danger?: boolean;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      style={{ ...menuItemStyle, color: danger ? '#DC2626' : menuItemStyle.color, opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'var(--clr-hover)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <Icon size={14} />
+      {label}
+    </button>
+  );
 }
 
 /** Finance module — Invoice History (Sprint 4). Server-side search/
@@ -64,6 +98,21 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  /* Per-row "More actions" menu — only one row's menu is ever open at a
+     time, so a single id + a single ref (attached only to whichever
+     row's menu is currently rendered) is enough; no per-row ref array
+     needed. */
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openMenuId]);
+
   /* Sprint 5, Part 7 — Download/Print/Email/Open PDF from a History
      row. Unlike InvoiceGeneratorPage (which always has a live
      off-screen InvoicePdf mounted for the invoice currently being
@@ -77,6 +126,13 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
   const pdfRef = useRef<HTMLDivElement>(null);
   const [emailTargetInvoice, setEmailTargetInvoice] = useState<Invoice | null>(null);
   const [emailSending, setEmailSending] = useState(false);
+
+  /* Preview modal — clicking "Preview" used to send the user all the
+     way to the Invoice Generator tab in read-only 'view' mode just to
+     look at the PDF; this renders the same on-demand PDF in place, in a
+     modal, so previewing an invoice never leaves Invoice History. */
+  const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const showNotice = (message: string) => {
     setNotice(message);
@@ -120,6 +176,29 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const handlePreviewRow = async (invoice: Invoice) => {
+    setBusyId(invoice.id);
+    setPreviewInvoice(invoice);
+    setPreviewUrl(null);
+    try {
+      await withRowPdf(invoice, ({ blob }) => {
+        setPreviewUrl(URL.createObjectURL(blob));
+      });
+    } catch (err) {
+      console.error('[invoice] Preview failed:', err);
+      showNotice('Failed to generate PDF preview. Please try again.');
+      setPreviewInvoice(null);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewInvoice(null);
+    setPreviewUrl(null);
   };
 
   /** Print doesn't need html2canvas at all — it just needs the
@@ -288,49 +367,65 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
                         <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--clr-text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatAmount(grandTotal, invoice.currency)}</td>
                         <td style={{ padding: '10px 14px', color: 'var(--clr-text-muted)', whiteSpace: 'nowrap' }}>{invoice.createdAt ? invoice.createdAt.slice(0, 10) : '—'}</td>
                         <td style={{ padding: '8px 10px' }}>
-                          <div style={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'nowrap' }}>
-                            <button onClick={() => onOpenInvoice(invoice.id, 'view')} title="View" aria-label={`View invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Eye size={13} /></button>
-                            <button onClick={() => onOpenInvoice(invoice.id, 'edit')} title="Edit" aria-label={`Edit invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Pencil size={13} /></button>
-                            <button onClick={() => handleDownloadRow(invoice)} disabled={rowBusy} title="Download PDF" aria-label={`Download PDF for invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
-                              {rowBusy && busyId === invoice.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                          <div style={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'nowrap' }}>
+                            <button onClick={() => handlePreviewRow(invoice)} disabled={rowBusy} title="Preview" aria-label={`Preview invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
+                              {rowBusy && busyId === invoice.id ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
                             </button>
-                            <button onClick={() => handlePrintRow(invoice)} disabled={rowBusy} title="Print" aria-label={`Print invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}><Printer size={13} /></button>
-                            <button
-                              onClick={() => setEmailTargetInvoice(invoice)}
-                              disabled={rowBusy || !invoice.email}
-                              title={invoice.email ? 'Email Invoice' : 'No customer email on file — add one first'}
-                              aria-label={invoice.email ? `Email invoice ${invoice.invoiceNumber}` : `Email invoice ${invoice.invoiceNumber} — no customer email on file`}
-                              className="btn-icon"
-                              style={{ border: 'none', cursor: (rowBusy || !invoice.email) ? 'not-allowed' : 'pointer', opacity: invoice.email ? 1 : 0.35 }}
-                            >
-                              <Mail size={13} />
-                            </button>
-                            <button onClick={() => handleOpenPdfRow(invoice)} disabled={rowBusy} title="Open PDF" aria-label={`Open PDF for invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}><ExternalLink size={13} /></button>
-                            <button
-                              onClick={() => handleOpenDriveRow(invoice)}
-                              disabled={!invoice.driveFileUrl}
-                              title={invoice.driveFileUrl ? 'Open in Google Drive' : 'Not uploaded to Google Drive yet'}
-                              aria-label={invoice.driveFileUrl ? `Open invoice ${invoice.invoiceNumber} in Google Drive` : `Invoice ${invoice.invoiceNumber} not uploaded to Google Drive yet`}
-                              className="btn-icon"
-                              style={{ border: 'none', cursor: invoice.driveFileUrl ? 'pointer' : 'not-allowed', opacity: invoice.driveFileUrl ? 1 : 0.35 }}
-                            >
-                              <Cloud size={13} />
-                            </button>
-                            <button onClick={() => handleDuplicate(invoice.id)} disabled={rowBusy} title="Duplicate" aria-label={`Duplicate invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}>
-                              {rowBusy ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
-                            </button>
-                            <button
-                              onClick={() => handleDelete(invoice.id, invoice.invoiceNumber)}
-                              disabled={rowBusy}
-                              title="Delete"
-                              aria-label={`Delete invoice ${invoice.invoiceNumber}`}
-                              className="btn-icon"
-                              style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}
-                              onMouseEnter={e => { e.currentTarget.style.color = 'var(--clr-danger)'; }}
-                              onMouseLeave={e => { e.currentTarget.style.color = 'var(--clr-text-muted)'; }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            <button onClick={() => onOpenInvoice(invoice.id, 'edit', invoice)} title="Edit" aria-label={`Edit invoice ${invoice.invoiceNumber}`} className="btn-icon" style={{ border: 'none', cursor: 'pointer' }}><Pencil size={13} /></button>
+
+                            {/* Every other action (Download/Print/Email/
+                                Open PDF/Open in Drive/Duplicate/Delete) —
+                                tucked behind one "More" trigger instead of
+                                7 more standing icons per row. */}
+                            <div style={{ position: 'relative' }} ref={openMenuId === invoice.id ? menuRef : undefined}>
+                              <button
+                                onClick={() => setOpenMenuId(prev => (prev === invoice.id ? null : invoice.id))}
+                                disabled={rowBusy}
+                                title="More actions"
+                                aria-label={`More actions for invoice ${invoice.invoiceNumber}`}
+                                aria-haspopup="menu"
+                                aria-expanded={openMenuId === invoice.id}
+                                className="btn-icon"
+                                style={{ border: 'none', cursor: rowBusy ? 'default' : 'pointer' }}
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
+
+                              {openMenuId === invoice.id && (
+                                <div
+                                  role="menu"
+                                  style={{
+                                    position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50,
+                                    width: 210, background: '#fff', border: '1px solid var(--clr-border)',
+                                    borderRadius: 10, boxShadow: '0 12px 28px rgba(15,23,42,0.16)', padding: 6,
+                                  }}
+                                >
+                                  <MenuItem icon={Download} label="Download PDF" onClick={() => { setOpenMenuId(null); handleDownloadRow(invoice); }} />
+                                  <MenuItem icon={Printer} label="Print" onClick={() => { setOpenMenuId(null); handlePrintRow(invoice); }} />
+                                  <MenuItem
+                                    icon={Mail}
+                                    label={invoice.email ? 'Email Invoice' : 'Email (no address on file)'}
+                                    disabled={!invoice.email}
+                                    onClick={() => { setOpenMenuId(null); setEmailTargetInvoice(invoice); }}
+                                  />
+                                  <MenuItem icon={ExternalLink} label="Open PDF in New Tab" onClick={() => { setOpenMenuId(null); handleOpenPdfRow(invoice); }} />
+                                  <MenuItem
+                                    icon={Cloud}
+                                    label={invoice.driveFileUrl ? 'Open in Google Drive' : 'Not on Google Drive yet'}
+                                    disabled={!invoice.driveFileUrl}
+                                    onClick={() => { setOpenMenuId(null); handleOpenDriveRow(invoice); }}
+                                  />
+                                  <MenuItem icon={Copy} label="Duplicate" onClick={() => { setOpenMenuId(null); handleDuplicate(invoice.id); }} />
+                                  <div style={{ height: 1, background: 'var(--clr-border)', margin: '4px 0' }} />
+                                  <MenuItem
+                                    icon={Trash2}
+                                    label="Delete"
+                                    danger
+                                    onClick={() => { setOpenMenuId(null); handleDelete(invoice.id, invoice.invoiceNumber); }}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -402,6 +497,55 @@ export function InvoiceHistoryPage({ onOpenInvoice }: Props) {
         sending={emailSending}
         onSend={handleSendEmailRow}
       />
+
+      {previewInvoice && createPortal(
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 10002, background: 'rgba(15,23,42,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={closePreview}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', width: '100%', maxWidth: 780, height: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--clr-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 800, color: 'var(--clr-text)' }}>
+                <Eye size={15} style={{ color: 'var(--arna-accent)' }} />
+                Invoice {previewInvoice.invoiceNumber}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button onClick={() => handleDownloadRow(previewInvoice)} title="Download PDF" aria-label="Download PDF" className="btn-icon" style={{ border: 'none' }}><Download size={14} /></button>
+                <button onClick={() => handlePrintRow(previewInvoice)} title="Print" aria-label="Print" className="btn-icon" style={{ border: 'none' }}><Printer size={14} /></button>
+                <button onClick={() => handleOpenPdfRow(previewInvoice)} title="Open in new tab" aria-label="Open in new tab" className="btn-icon" style={{ border: 'none' }}><ExternalLink size={14} /></button>
+                <button
+                  onClick={() => { onOpenInvoice(previewInvoice.id, 'edit', previewInvoice); closePreview(); }}
+                  title="Edit"
+                  aria-label="Edit invoice"
+                  className="btn-icon"
+                  style={{ border: 'none' }}
+                >
+                  <Pencil size={14} />
+                </button>
+                <div style={{ width: 1, height: 20, background: 'var(--clr-border)', margin: '0 2px' }} />
+                <button onClick={closePreview} title="Close" aria-label="Close preview" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B' }}>
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ flex: 1, background: '#525659', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+              {previewUrl ? (
+                <iframe src={previewUrl} title={`Invoice ${previewInvoice.invoiceNumber} preview`} style={{ width: '100%', height: '100%', border: 'none' }} />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  <Loader2 size={16} className="animate-spin" />
+                  Generating preview…
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

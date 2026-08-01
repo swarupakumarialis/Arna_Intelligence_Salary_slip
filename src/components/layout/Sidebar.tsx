@@ -19,6 +19,10 @@ interface Props {
   onNavigate: (key: SidebarKey) => void;
   /** Display label for the employee directory item (white-label aware). */
   teamDirectoryLabel: string;
+  /** Manual full collapse (see TopNav's sidebar-toggle button) —
+      distinct from the existing <=900px icon-only auto-collapse in
+      index.css, which stays in effect regardless of this prop. */
+  collapsed?: boolean;
 }
 
 /**
@@ -28,7 +32,7 @@ interface Props {
  * labelled sections (Sprint 4 polish) purely for scannability — the
  * SidebarKey contract and every existing destination are unchanged.
  */
-export function Sidebar({ activeKey, onNavigate, teamDirectoryLabel }: Props) {
+export function Sidebar({ activeKey, onNavigate, teamDirectoryLabel, collapsed }: Props) {
   const groups: NavGroup[] = [
     {
       label: 'Overview',
@@ -64,7 +68,7 @@ export function Sidebar({ activeKey, onNavigate, teamDirectoryLabel }: Props) {
   ];
 
   return (
-    <nav className="app-sidebar" aria-label="Primary">
+    <nav className={`app-sidebar${collapsed ? ' collapsed' : ''}`} aria-label="Primary" aria-hidden={collapsed || undefined}>
       {groups.map(group => (
         <div key={group.label} className="sidebar-group">
           <div className="sidebar-group-label">{group.label}</div>

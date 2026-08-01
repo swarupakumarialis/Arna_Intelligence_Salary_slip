@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Mail, Share2, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Mail, Share2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { ShareSalaryMenu } from './ShareSalaryMenu';
 
 interface Props {
@@ -51,19 +51,25 @@ export function ExportShareDropdown({ onEmailEmployee, onGmail, onOutlook, disab
       <button
         onClick={() => setOpen(v => !v)}
         disabled={disabled}
-        className="btn btn-secondary"
-        style={{ fontSize: 12, opacity: disabled ? 0.5 : 1 }}
+        className="btn-icon"
+        title="Share"
+        aria-label="Share"
+        style={{
+          width: 36, height: 36, border: '1px solid var(--clr-border)', borderRadius: 8,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--clr-surface)', opacity: disabled ? 0.5 : 1,
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Share2 size={13} /> Share <ChevronDown size={12} />
+        <Share2 size={15} />
       </button>
 
       {open && (
         <div
           role="menu"
           style={{
-            position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50,
+            position: 'absolute', top: 0, right: 'calc(100% + 8px)', zIndex: 50,
             width: 220, background: '#fff', border: '1px solid var(--clr-border)',
             borderRadius: 10, boxShadow: '0 12px 28px rgba(15,23,42,0.16)',
             padding: 6,

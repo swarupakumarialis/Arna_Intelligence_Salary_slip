@@ -28,6 +28,7 @@ import { buildEmailSubject, buildEmailBody } from './components/share/EmailTempl
 import { PreviewToolbar } from './components/preview/PreviewToolbar';
 import { CurrencyProvider, CurrencyCode } from './contexts/CurrencyContext';
 import type { InvoiceOpenRequest } from './modules/finance/invoice-generator/InvoiceGeneratorPage';
+import type { Invoice } from './modules/finance/types';
 
 /* Lazy-loaded — these are the pages a user visits after the Salary
    Generator, not on first load, so they're split into separate chunks
@@ -161,6 +162,30 @@ const fixedTaxConfig = defaultTaxConfigs[0];
 export default function App() {
   const { isAuthenticated, login, logout } = useAuth();
   const [data, setData] = useState<SalaryData>(initialData);
+  /* Unsaved-changes tracking for the Salary Generator (see the matching
+     mechanism in InvoiceGeneratorPage's onDirtyChange) — unlike Invoice,
+     `data` lives here in App.tsx and survives a page switch, but "saved"
+     still means "actually exported/archived to Salary History", so a
+     filled-in-but-never-exported form should still warn before the user
+     navigates elsewhere and assumes it's safe. savedSnapshotRef holds the
+     last-known-saved (or freshly loaded/exported) state as JSON; the
+     effect below recomputes salaryDirty whenever `data` changes.
+     justSyncedRef lets a programmatic load (loadHistoryRecordIntoGenerator)
+     mark the very next `data` change as the new clean baseline instead of
+     a user edit. */
+  const savedSnapshotRef = useRef<string>(JSON.stringify(initialData));
+  const justSyncedRef = useRef(false);
+  const [salaryDirty, setSalaryDirty] = useState(false);
+  useEffect(() => {
+    const serialized = JSON.stringify(data);
+    if (justSyncedRef.current) {
+      justSyncedRef.current = false;
+      savedSnapshotRef.current = serialized;
+      setSalaryDirty(false);
+      return;
+    }
+    setSalaryDirty(serialized !== savedSnapshotRef.current);
+  }, [data]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -213,6 +238,18 @@ export default function App() {
      lands on today — so this navigation shell changes nothing about
      the app's starting workflow. */
   const [activePage, setActivePage] = useState<SidebarKey>('generator');
+  /* Manual sidebar collapse (independent of the existing <=900px
+     icon-only auto-collapse in index.css) — a user on a small/narrow
+     screen can hide the nav rail entirely to reclaim width for the
+     actual content, which zooming out can't do since it shrinks
+     everything proportionally rather than freeing up space. Persisted
+     so the choice survives a reload. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('arna_sidebar_collapsed') === '1'
+  );
+  useEffect(() => {
+    try { localStorage.setItem('arna_sidebar_collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* ignore */ }
+  }, [sidebarCollapsed]);
   /* Sprint 4 — the one piece of Invoice-module state App.tsx lifts, so
      Invoice History can tell the Invoice Generator "open invoice X in
      edit/view mode" despite there being no URL router to carry that as
@@ -220,6 +257,22 @@ export default function App() {
      fetching, form state, etc.) stays self-contained within
      modules/finance/ — this is not a payroll/SalaryData concern. */
   const [invoiceOpenRequest, setInvoiceOpenRequest] = useState<InvoiceOpenRequest | null>(null);
+  /* Reported by InvoiceGeneratorPage's onDirtyChange (see that file) —
+     since that component unmounts on navigating away, this is the only
+     way App.tsx knows whether leaving 'invoice-generator' right now
+     would throw away in-progress work. */
+  const [invoiceDirty, setInvoiceDirty] = useState(false);
+  /* Same mechanism, reported by InvoiceSettingsPage's own onDirtyChange —
+     that page unmounts on navigating away too, so unsaved edits there
+     (bank details, notes/terms, company identity) are just as easy to
+     lose by clicking another sidebar item as an in-progress invoice. */
+  const [invoiceSettingsDirty, setInvoiceSettingsDirty] = useState(false);
+  /* Sidebar navigation the user asked for while a dirty form (Salary,
+     Invoice, or Invoice Settings) is on screen — held here until they
+     confirm via the Unsaved Changes dialog below, rather than switching
+     immediately. */
+  const [pendingNavKey, setPendingNavKey] = useState<SidebarKey | null>(null);
+  const [unsavedDialogSource, setUnsavedDialogSource] = useState<'salary' | 'invoice' | 'invoice-settings' | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   /* Points at the dedicated SalarySlipPDF instance (rendered off-screen,
      always mounted — see the JSX below) rather than the on-screen
@@ -447,10 +500,9 @@ export default function App() {
     }));
   }, [employees]);
 
-  /* Sprint 5.7 — the Employee Directory ('directory') is now a real
-     page like every other sidebar destination (it used to special-case
-     into opening the EmployeeMaster modal instead). */
-  const handleNavigate = useCallback((key: SidebarKey) => {
+  /* The actual page switch, once we know it's safe (either nothing was
+     dirty, or the user just confirmed leaving unsaved changes behind). */
+  const commitNavigate = useCallback((key: SidebarKey) => {
     /* Clicking "Invoice Generator" in the sidebar directly (as opposed
        to arriving via Invoice History's View/Edit) always means "start
        a new invoice" — clear any pending open request so the Generator
@@ -459,8 +511,45 @@ export default function App() {
     setActivePage(key);
   }, []);
 
-  const openInvoice = useCallback((id: string, mode: 'edit' | 'view') => {
-    setInvoiceOpenRequest({ id, mode });
+  /* Sprint 5.7 — the Employee Directory ('directory') is now a real
+     page like every other sidebar destination (it used to special-case
+     into opening the EmployeeMaster modal instead).
+     Later addition: warn before switching away from a dirty Salary
+     Generator or Invoice Generator instead of silently discarding
+     whatever the user was in the middle of typing. */
+  const handleNavigate = useCallback((key: SidebarKey) => {
+    const leavingDirtySalary = activePage === 'generator' && key !== 'generator' && salaryDirty;
+    const leavingDirtyInvoice = activePage === 'invoice-generator' && key !== 'invoice-generator' && invoiceDirty;
+    const leavingDirtyInvoiceSettings = activePage === 'invoice-settings' && key !== 'invoice-settings' && invoiceSettingsDirty;
+    if (leavingDirtySalary || leavingDirtyInvoice || leavingDirtyInvoiceSettings) {
+      setUnsavedDialogSource(leavingDirtyInvoice ? 'invoice' : leavingDirtyInvoiceSettings ? 'invoice-settings' : 'salary');
+      setPendingNavKey(key);
+      return;
+    }
+    commitNavigate(key);
+  }, [activePage, salaryDirty, invoiceDirty, invoiceSettingsDirty, commitNavigate]);
+
+  const handleCancelUnsavedNav = useCallback(() => {
+    setPendingNavKey(null);
+    setUnsavedDialogSource(null);
+  }, []);
+
+  const handleDiscardAndNavigate = useCallback(() => {
+    if (unsavedDialogSource === 'salary') {
+      /* The user explicitly chose to leave the Salary form as-is —
+         treat its current (still un-exported) state as the new
+         baseline so switching pages again later doesn't keep re-warning
+         about the exact same, already-acknowledged changes. */
+      savedSnapshotRef.current = JSON.stringify(data);
+      setSalaryDirty(false);
+    }
+    if (pendingNavKey) commitNavigate(pendingNavKey);
+    setPendingNavKey(null);
+    setUnsavedDialogSource(null);
+  }, [unsavedDialogSource, pendingNavKey, commitNavigate, data]);
+
+  const openInvoice = useCallback((id: string, mode: 'edit' | 'view', invoice?: Invoice) => {
+    setInvoiceOpenRequest({ id, mode, invoice });
     setActivePage('invoice-generator');
   }, []);
 
@@ -677,6 +766,12 @@ export default function App() {
 
     setActivityLog(logActivity('salary_generated', data.employee.name, `${data.salary.month} ${data.salary.year}`));
 
+    /* A real export just happened for exactly this `data` — re-baseline
+       so navigating away right after Export PDF doesn't still warn about
+       "unsaved changes" for a form that's now archived to history. */
+    savedSnapshotRef.current = JSON.stringify(data);
+    setSalaryDirty(false);
+
     return { pdf, fileName };
   }, [capturePdfDocument, data, brand, employees]);
 
@@ -850,6 +945,11 @@ export default function App() {
      export pipeline," via the effect above rather than a synchronous
      call here. */
   const loadHistoryRecordIntoGenerator = useCallback((record: SalaryHistoryRecord, autoExport = false) => {
+    /* Loading a record is a programmatic sync, not a user edit — the
+       resulting `data` should become the new clean baseline rather than
+       reading as "unsaved changes", so the dirty-tracking effect above
+       re-baselines instead of comparing against the old snapshot. */
+    justSyncedRef.current = true;
     setData(prev => ({
       ...prev,
       employee: {
@@ -1069,6 +1169,84 @@ export default function App() {
         </div>
       )}
 
+      {/* ── UNSAVED CHANGES DIALOG ──────────────────────────────────── */}
+      {pendingNavKey && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(15,23,42,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24,
+        }}
+          onClick={handleCancelUnsavedNav}
+        >
+          <div
+            style={{
+              background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+              padding: '28px 32px', maxWidth: 440, width: '100%',
+              position: 'relative',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={handleCancelUnsavedNav}
+              style={{
+                position: 'absolute', top: 14, right: 14,
+                background: '#F1F5F9', border: 'none', borderRadius: 6,
+                width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', color: '#64748B',
+              }}
+            >
+              <X size={14} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <AlertTriangle size={20} color="#DC2626" />
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 4 }}>
+                  Unsaved Changes
+                </div>
+                <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>
+                  {unsavedDialogSource === 'invoice'
+                    ? "This invoice hasn't been saved yet. Switching pages now will lose your changes."
+                    : unsavedDialogSource === 'invoice-settings'
+                    ? "These invoice settings haven't been saved yet. Switching pages now will lose your changes."
+                    : "This payslip hasn't been exported yet. Switching pages now will lose your changes."}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={handleCancelUnsavedNav}
+                style={{
+                  flex: 1, padding: '10px 0', background: '#F1F5F9',
+                  color: '#0F172A', border: 'none', borderRadius: 8,
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Stay & Save
+              </button>
+              <button
+                onClick={handleDiscardAndNavigate}
+                style={{
+                  flex: 1, padding: '10px 0', background: '#DC2626',
+                  color: '#fff', border: 'none', borderRadius: 8,
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Discard & Switch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <EmailSalaryModal
         isOpen={showEmailModal}
         onClose={() => setShowEmailModal(false)}
@@ -1094,6 +1272,8 @@ export default function App() {
         appName={APP_NAME}
         periodLabel={getCurrentPeriodLabel()}
         onLogout={logout}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed(v => !v)}
       />
 
       <div className="app-body">
@@ -1101,6 +1281,7 @@ export default function App() {
           activeKey={activePage}
           onNavigate={handleNavigate}
           teamDirectoryLabel={TEAM_DIRECTORY_TITLE}
+          collapsed={sidebarCollapsed}
         />
 
         <main className="app-content">
@@ -1135,20 +1316,77 @@ export default function App() {
 
                 {/* ── RIGHT: Live Preview ─────────────────────── */}
                 <aside className="preview-panel animate-fade-in-up" style={{ animationDelay: '80ms', minWidth: 0 }}>
-                  <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <p style={{ fontSize: 17, fontWeight: 800, color: 'var(--clr-text)', margin: 0, letterSpacing: '-0.02em' }}>Live Preview</p>
-                      <p style={{ fontSize: 12, color: 'var(--clr-text-muted)', margin: '2px 0 0' }}>A4 · Updates instantly</p>
+                  <div style={{ marginBottom: 20 }}>
+                    <p style={{ fontSize: 17, fontWeight: 800, color: 'var(--clr-text)', margin: 0, letterSpacing: '-0.02em' }}>Live Preview</p>
+                    <p style={{ fontSize: 12, color: 'var(--clr-text-muted)', margin: '2px 0 0' }}>A4 · Updates instantly</p>
+                  </div>
+
+                  {/* Icon-only actions, stacked vertically beside the
+                      preview itself rather than as labelled buttons
+                      above it. */}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <PreviewToolbar
+                        zoomPct={Math.round(previewScale * 100)}
+                        onZoomIn={handleZoomIn}
+                        onZoomOut={handleZoomOut}
+                        onSetZoom={handleSetZoom}
+                        onFitWidth={handleFitWidth}
+                        onFitPage={handleFitPage}
+                        onReset={handleResetZoom}
+                        onFullscreen={handleToggleFullscreen}
+                        isFullscreen={isPreviewFullscreen}
+                      />
+
+                      <div className="preview-shell" ref={shellRef}>
+                        {data.employee.name.trim() ? (
+                          <div style={{
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            /* collapsed height = A4 height × scale; A4 = 1123px at 96dpi */
+                            minHeight: `${Math.round(1123 * previewScale)}px`,
+                            padding: '28px 0',
+                          }}>
+                            <div
+                              id="preview-scale-wrapper"
+                              style={{
+                                width: 794,
+                                transformOrigin: 'top center',
+                                transform: `scale(${previewScale})`,
+                                flexShrink: 0,
+                                boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+                                borderRadius: 3,
+                                height: 'fit-content',
+                              }}
+                            >
+                              <SalarySlipPreview data={data} previewRef={previewRef} taxConfig={fixedTaxConfig} brand={brand} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="preview-empty-state">
+                            <div className="preview-empty-state-icon"><FileText size={22} /></div>
+                            <h2>No employee selected</h2>
+                            <p>Select an employee or enter their name to generate a live salary slip preview.</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
                       <button
                         onClick={handleDownloadPDF}
                         disabled={isGenerating}
-                        className="btn btn-dark"
-                        style={{ fontSize: 12, opacity: isGenerating ? 0.7 : 1 }}
+                        className="btn-icon"
+                        title={isGenerating ? 'Exporting…' : 'Export PDF'}
+                        aria-label={isGenerating ? 'Exporting…' : 'Export PDF'}
+                        style={{
+                          width: 36, height: 36, border: 'none', borderRadius: 8,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'var(--arna-navy)', color: '#fff', opacity: isGenerating ? 0.7 : 1,
+                        }}
                       >
-                        {isGenerating ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                        {isGenerating ? 'Exporting…' : 'Export PDF'}
+                        {isGenerating ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                       </button>
                       <ExportShareDropdown
                         disabled={isGenerating}
@@ -1157,52 +1395,6 @@ export default function App() {
                         onOutlook={() => handleShareVia('outlook')}
                       />
                     </div>
-                  </div>
-
-                  <PreviewToolbar
-                    zoomPct={Math.round(previewScale * 100)}
-                    onZoomIn={handleZoomIn}
-                    onZoomOut={handleZoomOut}
-                    onSetZoom={handleSetZoom}
-                    onFitWidth={handleFitWidth}
-                    onFitPage={handleFitPage}
-                    onReset={handleResetZoom}
-                    onFullscreen={handleToggleFullscreen}
-                    isFullscreen={isPreviewFullscreen}
-                  />
-
-                  <div className="preview-shell" ref={shellRef}>
-                    {data.employee.name.trim() ? (
-                      <div style={{
-                        width: '100%',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        /* collapsed height = A4 height × scale; A4 = 1123px at 96dpi */
-                        minHeight: `${Math.round(1123 * previewScale)}px`,
-                        padding: '28px 0',
-                      }}>
-                        <div
-                          id="preview-scale-wrapper"
-                          style={{
-                            width: 794,
-                            transformOrigin: 'top center',
-                            transform: `scale(${previewScale})`,
-                            flexShrink: 0,
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-                            borderRadius: 3,
-                            height: 'fit-content',
-                          }}
-                        >
-                          <SalarySlipPreview data={data} previewRef={previewRef} taxConfig={fixedTaxConfig} brand={brand} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="preview-empty-state">
-                        <div className="preview-empty-state-icon"><FileText size={22} /></div>
-                        <h2>No employee selected</h2>
-                        <p>Select an employee or enter their name to generate a live salary slip preview.</p>
-                      </div>
-                    )}
                   </div>
                 </aside>
 
@@ -1307,6 +1499,7 @@ export default function App() {
                 <InvoiceGeneratorPage
                   openRequest={invoiceOpenRequest}
                   onOpenRequestHandled={() => setInvoiceOpenRequest(null)}
+                  onDirtyChange={setInvoiceDirty}
                 />
               </Suspense>
             </div>
@@ -1323,7 +1516,7 @@ export default function App() {
           {activePage === 'invoice-settings' && (
             <div className="page-container app-page">
               <Suspense fallback={<PageLoadingFallback />}>
-                <InvoiceSettingsPage />
+                <InvoiceSettingsPage onDirtyChange={setInvoiceSettingsDirty} />
               </Suspense>
             </div>
           )}
