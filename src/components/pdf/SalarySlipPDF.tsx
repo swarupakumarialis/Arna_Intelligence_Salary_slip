@@ -5,7 +5,7 @@ import { amountToWords } from '../../utils/currencyService';
 import { useCurrency } from '../../contexts/CurrencyContext';
 import { PDFWatermark } from './PDFWatermark';
 import { PDFHeader } from './PDFHeader';
-import { PDFEmployeeInfo } from './PDFEmployeeInfo';
+import { PDFEmployeeInfo, maskAccountNumber } from './PDFEmployeeInfo';
 import { PDFSalaryTable } from './PDFSalaryTable';
 import { PDFTotals } from './PDFTotals';
 import { PDFFooter } from './PDFFooter';
@@ -50,6 +50,19 @@ export function SalarySlipPDF({ data, brand, taxConfig, pdfRef }: Props) {
     email:   (brand.showEmail   ?? true) ? brand.email?.trim()   || undefined : undefined,
     phone:   (brand.showPhone   ?? true) ? brand.phone?.trim()   || undefined : undefined,
   };
+
+  /* Company Bank Details — see BrandConfig's field comment
+     (companySettingsStore.ts) for why this lives on Company Settings
+     rather than Invoice Settings' own separate bank fields. */
+  const bankFields: [string, string][] = [
+    ['Bank', brand.bankName || ''],
+    ['Holder', brand.bankAccountHolder || ''],
+    ['A/C No.', maskAccountNumber(brand.bankAccountNumber || '')],
+    ['IFSC', brand.bankIfscCode || ''],
+    ['SWIFT', brand.bankSwiftCode || ''],
+    ['UPI', brand.bankUpiId || ''],
+  ].filter(([, v]) => v.trim()) as [string, string][];
+  const showBankDetails = (brand.showBankDetails ?? true) && bankFields.length > 0;
 
   /* ── Calculations (untouched — read-only consumption of totals) ── */
   const totalEarnings   = data.earnings.reduce((s, i) => s + (Number(i.amount) || 0), 0);
@@ -120,6 +133,9 @@ export function SalarySlipPDF({ data, brand, taxConfig, pdfRef }: Props) {
           joiningDate={formatDate(data.employee.doj)}
           paidDays={Number(data.salary.paidDays) || 0}
           lopDays={Number(data.salary.lopDays) || 0}
+          bankName={data.employee.bankName || ''}
+          bankAccount={data.employee.bankAccount || ''}
+          ifscCode={data.employee.ifscCode || ''}
           primary={primary}
           secondary={secondary}
         />
@@ -128,15 +144,37 @@ export function SalarySlipPDF({ data, brand, taxConfig, pdfRef }: Props) {
 
         <PDFTotals totalEarnings={totalEarnings} totalDeductions={totalDeductions} netPay={netPay} fmt={fmt} primary={primary} />
 
-        {/* Amount in Words — compact bordered row, not a large box */}
-        <div style={{
-          border: '1px solid #E2E8F0', borderRadius: 4, padding: '8px 14px', marginBottom: 9,
-          display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0, flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', flexShrink: 0 }}>
-            Amount in Words
-          </span>
-          <span style={{ fontSize: '8.5pt', fontWeight: 600, color: '#1F2937' }}>{netPayWords}</span>
+        {/* Amount in Words + Company Bank Details — side by side rather
+            than stacked, so adding Bank Details never grows the page's
+            vertical footprint (this document is already a tight single-
+            page fit). Bank Details only renders when there's something
+            configured and the Display Options toggle allows it; when
+            hidden, Amount in Words simply takes the full row. */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 9, flexShrink: 0 }}>
+          <div style={{
+            flex: 1, border: '1px solid #E2E8F0', borderRadius: 4, padding: '8px 14px',
+            display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', flexShrink: 0 }}>
+              Amount in Words
+            </span>
+            <span style={{ fontSize: '8.5pt', fontWeight: 600, color: '#1F2937' }}>{netPayWords}</span>
+          </div>
+          {showBankDetails && (
+            <div style={{ flex: 1, border: '1px solid #E2E8F0', borderRadius: 4, padding: '8px 14px' }}>
+              <div style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', marginBottom: 3 }}>
+                Company Bank Details
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 12, rowGap: 1 }}>
+                {bankFields.map(([label, value]) => (
+                  <span key={label} style={{ fontSize: '7.5pt', color: '#1F2937' }}>
+                    <span style={{ color: '#94A3B8', fontWeight: 600 }}>{label}: </span>
+                    <span style={{ fontWeight: 600, fontFamily: 'ui-monospace, monospace' }}>{value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <PDFFooter

@@ -203,24 +203,25 @@ export function InvoiceSettingsPage({ onDirtyChange }: Props = {}) {
         description="Configure numbering, defaults, and payment details that automatically populate new invoices."
       />
 
-      {/* Fixed-position toast (not an inline banner) — this page's Save
-          button sits at the bottom of a long form, so a confirmation
-          that only appeared up here near the breadcrumb would routinely
-          go unseen. This stays visible regardless of scroll position. */}
+      {/* Fixed side pop-up (top-right, below the header) — this page's
+          Save button sits at the bottom of a long form, so a
+          confirmation that only appeared up here near the breadcrumb
+          would routinely go unseen. Sits below the sticky top nav (80px)
+          rather than centered over it, so it never overlaps the header;
+          same placement as InvoiceGeneratorPage's own save pop-up. */}
       {notice && (
         <div style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 10001,
+          position: 'fixed', top: 96, right: 24, zIndex: 10001,
           maxWidth: 360, padding: '12px 16px', borderRadius: 10,
           background: noticeTone === 'success' ? '#0F766E' : '#B91C1C',
           color: '#fff', fontSize: 12.5, fontWeight: 600,
           boxShadow: '0 12px 32px rgba(15,23,42,0.28)',
-          display: 'flex', alignItems: 'center', gap: 8,
         }}>
           {notice}
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 860 }}>
+      <div className="invoice-settings-shell" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Card title="Company Identity" icon={<Building2 size={13} />}>
           <p style={{ fontSize: 11.5, color: 'var(--clr-text-subtle)', margin: '0 0 14px' }}>
             Shown on every invoice (and the Salary payslip) — shared with Company Settings, so editing it here updates it there too.
@@ -275,7 +276,11 @@ export function InvoiceSettingsPage({ onDirtyChange }: Props = {}) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 16 }}>
             <Field label="Bank Name" value={settings.bankName} onChange={e => patch({ bankName: e.target.value })} placeholder="Sample Bank Ltd." />
             <Field label="Account Holder" value={settings.accountHolder} onChange={e => patch({ accountHolder: e.target.value })} placeholder="Company Legal Name" />
-            <Field label="Account Number" value={settings.accountNumber} onChange={e => patch({ accountNumber: e.target.value })} placeholder="0000 1234 5678" />
+            <Field
+              label="Account Number" value={settings.accountNumber} onChange={e => patch({ accountNumber: e.target.value })}
+              placeholder="0000 1234 5678"
+              hint="Masked on invoices — customers only see the last 4 digits."
+            />
             <Field label="IFSC Code" value={settings.ifscCode} onChange={e => patch({ ifscCode: e.target.value.toUpperCase() })} placeholder="SAMP0000123" />
             <Field label="SWIFT Code" value={settings.swiftCode} onChange={e => patch({ swiftCode: e.target.value.toUpperCase() })} placeholder="Optional — for international transfers" />
             <Field label="UPI ID" value={settings.upiId} onChange={e => patch({ upiId: e.target.value })} placeholder="billing@upi" />

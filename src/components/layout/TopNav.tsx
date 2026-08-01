@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building2, LogOut, User, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Building2, LogOut, User } from 'lucide-react';
 import { useCurrency, CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../../contexts/CurrencyContext';
 
 interface Props {
@@ -7,13 +7,6 @@ interface Props {
   appName: string;
   periodLabel: string;
   onLogout?: () => void;
-  /** Sidebar collapse toggle — lets someone on a small/narrow screen
-      hide the nav rail entirely to reclaim width for the actual
-      content (zooming out can't do this, since it shrinks everything
-      proportionally instead of freeing up space). Optional so TopNav
-      still renders sensibly if a future caller doesn't wire it up. */
-  sidebarCollapsed?: boolean;
-  onToggleSidebar?: () => void;
 }
 
 /**
@@ -30,23 +23,12 @@ interface Props {
  * No tagline/subtitle under the product name — logo + name only, per
  * the cleaner, more premium nav treatment.
  */
-export function TopNav({ logoDataUri, appName, periodLabel, onLogout, sidebarCollapsed, onToggleSidebar }: Props) {
+export function TopNav({ logoDataUri, appName, periodLabel, onLogout }: Props) {
   const { currency, setCurrency } = useCurrency();
 
   return (
     <header className="app-topnav">
       <div className="app-topnav-brand">
-        {onToggleSidebar && (
-          <button
-            className="app-topnav-sidebar-toggle"
-            onClick={onToggleSidebar}
-            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            aria-pressed={sidebarCollapsed}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </button>
-        )}
         <div className="app-topnav-logo">
           {logoDataUri ? <img src={logoDataUri} alt={appName} /> : <Building2 size={22} />}
         </div>

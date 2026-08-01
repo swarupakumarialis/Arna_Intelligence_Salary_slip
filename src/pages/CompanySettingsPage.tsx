@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { BrandConfig } from '../utils/companySettingsStore';
+import React, { useEffect, useState } from 'react';
+import { BrandConfig, DEFAULT_BRAND } from '../utils/companySettingsStore';
 import { FormErrors, TouchedFields } from '../App';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
-import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock, Cloud, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { Sparkles, Building2, Palette, Phone, Wallet, FileText, ToggleLeft, Upload, X, Coins, Contrast, Zap, Clock, Cloud, CheckCircle2, XCircle, RefreshCw, Save } from 'lucide-react';
 import { CurrencyCode, CURRENCY_META, CURRENCY_CODES } from '../contexts/CurrencyContext';
 import {
   getGoogleDriveStatus, connectGoogleDrive, disconnectGoogleDrive, testGoogleDriveConnection, getGoogleDriveStorageStats,
@@ -17,8 +17,17 @@ interface Props {
   errors: FormErrors;
   touched: TouchedFields;
   onBlurField: (field: keyof Omit<FormErrors, 'deductions'>) => void;
-  /** Fired once, when the page is left, only if something actually changed. */
+  /** Fired once per actual Save click, only if something changed. */
   onSettingsChanged: () => void;
+  /** Fires whenever "does this page have edits that haven't been saved
+      yet" flips — App.tsx uses this the same way it uses
+      InvoiceGeneratorPage/InvoiceSettingsPage's onDirtyChange, to warn
+      before switching the sidebar away from a page with unsaved work.
+      This page used to auto-save every keystroke, so there was never
+      anything to lose by navigating away; now that each section has its
+      own explicit Save button, an edit sitting in the draft below is
+      real unsaved work until Save is clicked. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type TabKey = 'brand' | 'company' | 'currency' | 'display' | 'pdf' | 'google-drive' | 'advanced';
@@ -84,6 +93,30 @@ function InlineTextarea({
   );
 }
 
+/** One "Save [Section]" button, repeated at the bottom of every tab that
+    has editable fields (Brand, Company, Currency, Display, PDF) — the
+    literal ask behind this page's draft/Save split: "each section
+    should have a save option". `dirty` is shared across every instance
+    (see isDirty below) since every tab edits the same underlying
+    BrandConfig object — saving from any one of them persists all
+    pending edits, not just that tab's own fields. */
+function SaveBar({ dirty, onSave, label }: { dirty: boolean; onSave: () => void; label: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 4 }}>
+      {dirty && <span style={{ fontSize: 11, color: 'var(--clr-text-subtle)', fontStyle: 'italic' }}>Unsaved changes</span>}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={!dirty}
+        className="btn btn-dark"
+        style={{ fontSize: 12.5, opacity: dirty ? 1 : 0.5, cursor: dirty ? 'pointer' : 'default' }}
+      >
+        <Save size={13} /> {label}
+      </button>
+    </div>
+  );
+}
+
 const DISPLAY_TOGGLES: { key: keyof BrandConfig; label: string }[] = [
   { key: 'showLogo', label: 'Show Company Logo' },
   { key: 'showCompanyName', label: 'Show Company Name' },
@@ -93,6 +126,7 @@ const DISPLAY_TOGGLES: { key: keyof BrandConfig; label: string }[] = [
   { key: 'showWebsite', label: 'Show Website' },
   { key: 'showEmail', label: 'Show Email' },
   { key: 'showPhone', label: 'Show Phone Number' },
+  { key: 'showBankDetails', label: 'Show Bank Details on Payslip' },
   { key: 'showNameWatermark', label: 'Show Name Watermark' },
   { key: 'showSignatory', label: 'Show Authorised Signatory' },
   { key: 'showPoweredBy', label: 'Show "Powered by ARNA"' },
@@ -102,20 +136,64 @@ const DISPLAY_TOGGLES: { key: keyof BrandConfig; label: string }[] = [
 
 /**
  * White-label configuration for the whole application, organised into
- * tabs by category. Every field still reads from / writes through the
- * same BrandConfig object that drives the Live Preview, the exported
- * PDF, and (via --brand-primary/--brand-secondary) the app's own nav
- * chrome — this page only changes how the fields are grouped on
- * screen, not what they do.
+ * tabs by category. Every field reads from / writes through a local
+ * `draft` copy of the same BrandConfig object that drives the Live
+ * Preview, the exported PDF, and (via --brand-primary/--brand-secondary)
+ * the app's own nav chrome — edits only become live once a section's
+ * Save button is clicked (see SaveBar above), rather than the old
+ * auto-save-on-every-keystroke behaviour, so a half-finished edit never
+ * silently applies everywhere before it's ready.
  */
-export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors, touched, onBlurField, onSettingsChanged }: Props) {
+export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors, touched, onBlurField, onSettingsChanged, onDirtyChange }: Props) {
   const [tab, setTab] = useState<TabKey>('brand');
+
+  /* Local draft — the one thing every field in this page actually reads
+     from / writes to. Seeded once from the live `brand` prop on mount;
+     this page (like InvoiceGeneratorPage/InvoiceSettingsPage) owns its
+     own self-contained form state rather than reactively resyncing from
+     the prop afterwards, so an in-progress edit here is never clobbered
+     by an unrelated external brand change. */
+  const [draft, setDraft] = useState<BrandConfig>(brand);
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(brand);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty]);
+  useEffect(() => () => { onDirtyChange?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const patch = (p: Partial<BrandConfig>) => setDraft(prev => ({ ...prev, ...p }));
+
+  const [notice, setNotice] = useState<string | null>(null);
+  const showNotice = (message: string) => {
+    setNotice(message);
+    setTimeout(() => setNotice(null), 4000);
+  };
+
+  /** Shared by every tab's SaveBar — persists the current draft (all of
+      it, not just the fields visible on the tab that was clicked, since
+      it's one underlying object) via onBrandChange, stamps
+      exchangeRateUpdatedAt only when the rates actually changed, then
+      reports one activity-log entry and a confirmation pop-up. */
+  const handleSave = (label: string) => {
+    const rateChanged = JSON.stringify(draft.exchangeRates) !== JSON.stringify(brand.exchangeRates);
+    const toSave = rateChanged ? { ...draft, exchangeRateUpdatedAt: new Date().toISOString() } : draft;
+    onBrandChange(toSave);
+    setDraft(toSave);
+    onSettingsChanged();
+    showNotice(`${label} saved.`);
+  };
+
+  const handleReset = () => {
+    onResetBrand();
+    setDraft(DEFAULT_BRAND);
+  };
 
   /* Google Drive connection (Sprint 6.2A). Status is fetched fresh on
      mount rather than kept in App.tsx's shared state — this is the
-     only place in the app that needs it, following the same
-     "fetch where it's used" pattern as the rest of this page (which
-     otherwise only ever reads/writes the brand prop). */
+     only place in the app that needs it. Entirely separate from
+     BrandConfig/draft above — every action here (connect/disconnect/
+     test) is immediate, not something to stage and save. */
   const [driveStatus, setDriveStatus] = useState<GoogleDriveStatus | null>(null);
   const [driveLoading, setDriveLoading] = useState(true);
   const [driveActionPending, setDriveActionPending] = useState<'connect' | 'disconnect' | 'test' | null>(null);
@@ -213,28 +291,11 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
   const err = (field: keyof Omit<FormErrors, 'deductions'>) =>
     touched[field] ? errors[field] : undefined;
 
-  /* Company Settings auto-saves on every change (see App.tsx's setBrand)
-     — there's no explicit Save step. To avoid flooding the activity
-     feed with one entry per keystroke, this reports a single summary
-     event when the page unmounts, and only if brand actually changed
-     during the visit. */
-  const initialBrandRef = useRef(brand);
-  const latestBrandRef = useRef(brand);
-  latestBrandRef.current = brand;
-  useEffect(() => {
-    return () => {
-      if (JSON.stringify(latestBrandRef.current) !== JSON.stringify(initialBrandRef.current)) {
-        onSettingsChanged();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => onBrandChange({ ...brand, logoDataUri: reader.result as string });
+    reader.onloadend = () => patch({ logoDataUri: reader.result as string });
     reader.readAsDataURL(file);
   };
 
@@ -242,10 +303,10 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
     <div className="animate-fade-in-up">
       <PageHeader
         title="Company Settings"
-        description="Logo, identity, branding, and PDF details — reflected instantly across the Live Preview, the exported PDF, and the app's own navigation."
+        description="Logo, identity, branding, and PDF details — edit any section below, then click its Save button to apply the changes."
         actions={
           <button
-            onClick={onResetBrand}
+            onClick={handleReset}
             className="btn btn-secondary"
             style={{ fontSize: 12 }}
           >
@@ -253,6 +314,19 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
           </button>
         }
       />
+
+      {/* Fixed top pop-up — same placement as the Invoice module's own
+          save confirmations, clear of the sticky 80px header. */}
+      {notice && (
+        <div style={{
+          position: 'fixed', top: 96, right: 24, zIndex: 10001,
+          maxWidth: 360, padding: '12px 16px', borderRadius: 10,
+          background: '#0F766E', color: '#fff', fontSize: 12.5, fontWeight: 600,
+          boxShadow: '0 12px 32px rgba(15,23,42,0.28)',
+        }}>
+          {notice}
+        </div>
+      )}
 
       <div className="tabs-row">
         {TABS.map(({ key, label, icon: Icon }) => (
@@ -268,11 +342,11 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
             <div>
               <FieldLabel>Company Logo</FieldLabel>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {brand.logoDataUri && (
+                {draft.logoDataUri && (
                   <div style={{ position: 'relative' }}>
-                    <img src={brand.logoDataUri} alt="Company logo" style={{ height: 44, width: 'auto', maxWidth: 90, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--clr-border)', padding: 4 }} />
+                    <img src={draft.logoDataUri} alt="Company logo" style={{ height: 44, width: 'auto', maxWidth: 90, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--clr-border)', padding: 4 }} />
                     <button
-                      onClick={() => onBrandChange({ ...brand, logoDataUri: null })}
+                      onClick={() => patch({ logoDataUri: null })}
                       title="Remove logo"
                       style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: '#374151', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
                     >
@@ -282,7 +356,7 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                 )}
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', border: '1.5px dashed var(--clr-border)', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 600, color: 'var(--clr-text-muted)' }}>
                   <Upload size={13} />
-                  {brand.logoDataUri ? 'Change Logo' : 'Upload Logo'}
+                  {draft.logoDataUri ? 'Change Logo' : 'Upload Logo'}
                   <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} />
                 </label>
               </div>
@@ -292,18 +366,18 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
               <FieldLabel>Primary Brand Colour</FieldLabel>
               <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>Header, buttons, table headers, net pay card.</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <input type="color" value={brand.primaryColour} onChange={e => onBrandChange({ ...brand, primaryColour: e.target.value })}
+                <input type="color" value={draft.primaryColour} onChange={e => patch({ primaryColour: e.target.value })}
                   style={{ width: 40, height: 36, padding: 2, borderRadius: 6, border: '1.5px solid var(--clr-border)', cursor: 'pointer', background: 'none' }} />
-                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--clr-text-muted)', fontWeight: 600 }}>{brand.primaryColour}</span>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--clr-text-muted)', fontWeight: 600 }}>{draft.primaryColour}</span>
               </div>
             </div>
             <div>
               <FieldLabel>Secondary Brand Colour</FieldLabel>
               <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 8px' }}>Accent lines, icons, highlights, card borders.</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <input type="color" value={brand.secondaryColour} onChange={e => onBrandChange({ ...brand, secondaryColour: e.target.value })}
+                <input type="color" value={draft.secondaryColour} onChange={e => patch({ secondaryColour: e.target.value })}
                   style={{ width: 40, height: 36, padding: 2, borderRadius: 6, border: '1.5px solid var(--clr-border)', cursor: 'pointer', background: 'none' }} />
-                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--clr-text-muted)', fontWeight: 600 }}>{brand.secondaryColour}</span>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--clr-text-muted)', fontWeight: 600 }}>{draft.secondaryColour}</span>
               </div>
             </div>
           </div>
@@ -340,14 +414,16 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
         </Card>
       )}
 
+      {tab === 'brand' && <SaveBar dirty={isDirty} onSave={() => handleSave('Brand settings')} label="Save Brand Settings" />}
+
       {tab === 'company' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="Company Identity">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
               <InlineInput
                 label="Company Name" type="text" name="companyName" required
-                value={brand.companyName}
-                onChange={e => onBrandChange({ ...brand, companyName: e.target.value })}
+                value={draft.companyName}
+                onChange={e => patch({ companyName: e.target.value })}
                 onBlur={() => onBlurField('companyName')}
                 placeholder="Acme Corporation"
                 error={err('companyName')}
@@ -355,8 +431,8 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
               <div />
               <InlineTextarea
                 label="Company Address" name="companyAddress" required
-                value={brand.companyAddress}
-                onChange={e => onBrandChange({ ...brand, companyAddress: e.target.value })}
+                value={draft.companyAddress}
+                onChange={e => patch({ companyAddress: e.target.value })}
                 onBlur={() => onBlurField('companyAddress')}
                 rows={4} style={{ resize: 'none' }} placeholder="Full address..."
                 error={err('companyAddress')}
@@ -366,15 +442,40 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
 
           <Card title="Contact Details" icon={<Phone size={13} />}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-              <InlineInput label="GSTIN" type="text" name="gstin" value={brand.gstin || ''} onChange={e => onBrandChange({ ...brand, gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
-              <InlineInput label="PAN" type="text" name="pan" value={brand.pan || ''} onChange={e => onBrandChange({ ...brand, pan: e.target.value })} placeholder="AAAPL1234C" />
-              <InlineInput label="Phone" type="text" name="phone" value={brand.phone || ''} onChange={e => onBrandChange({ ...brand, phone: e.target.value })} placeholder="+91 98765 43210" />
-              <InlineInput label="Email" type="text" name="email" value={brand.email || ''} onChange={e => onBrandChange({ ...brand, email: e.target.value })} placeholder="hr@company.com" />
+              <InlineInput label="GSTIN" type="text" name="gstin" value={draft.gstin || ''} onChange={e => patch({ gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
+              <InlineInput label="PAN" type="text" name="pan" value={draft.pan || ''} onChange={e => patch({ pan: e.target.value })} placeholder="AAAPL1234C" />
+              <InlineInput label="Phone" type="text" name="phone" value={draft.phone || ''} onChange={e => patch({ phone: e.target.value })} placeholder="+91 98765 43210" />
+              <InlineInput label="Email" type="text" name="email" value={draft.email || ''} onChange={e => patch({ email: e.target.value })} placeholder="hr@company.com" />
               <div style={{ gridColumn: '1 / -1' }}>
-                <InlineInput label="Website" type="text" name="website" value={brand.website || ''} onChange={e => onBrandChange({ ...brand, website: e.target.value })} placeholder="www.company.com" />
+                <InlineInput label="Website" type="text" name="website" value={draft.website || ''} onChange={e => patch({ website: e.target.value })} placeholder="www.company.com" />
               </div>
             </div>
           </Card>
+
+          <Card title="Bank Details" icon={<Wallet size={13} />}>
+            <p style={{ fontSize: 11.5, color: 'var(--clr-text-subtle)', margin: '0 0 14px' }}>
+              Shown on every Salary Slip (screen and PDF), next to "Amount in Words" — the same way the Invoice module
+              shows its own bank details on an invoice. The account number is always masked there; only the last 4
+              digits are shown. Toggle visibility under Display Options.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+              <InlineInput label="Bank Name" type="text" value={draft.bankName || ''} onChange={e => patch({ bankName: e.target.value })} placeholder="HDFC Bank" />
+              <InlineInput label="Account Holder" type="text" value={draft.bankAccountHolder || ''} onChange={e => patch({ bankAccountHolder: e.target.value })} placeholder="Company Legal Name" />
+              <InlineInput
+                label="Account Number" type="text" value={draft.bankAccountNumber || ''}
+                onChange={e => patch({ bankAccountNumber: e.target.value })}
+                placeholder="0000 1234 5678"
+              />
+              <InlineInput label="IFSC Code" type="text" value={draft.bankIfscCode || ''} onChange={e => patch({ bankIfscCode: e.target.value.toUpperCase() })} placeholder="HDFC0001234" />
+              <InlineInput label="SWIFT Code" type="text" value={draft.bankSwiftCode || ''} onChange={e => patch({ bankSwiftCode: e.target.value.toUpperCase() })} placeholder="Optional — for international transfers" />
+              <InlineInput label="UPI ID" type="text" value={draft.bankUpiId || ''} onChange={e => patch({ bankUpiId: e.target.value })} placeholder="billing@upi" />
+            </div>
+            <p style={{ fontSize: 10.5, color: 'var(--clr-text-subtle)', margin: '8px 0 0' }}>
+              Masked on the Salary Slip — employees only see the last 4 digits.
+            </p>
+          </Card>
+
+          <SaveBar dirty={isDirty} onSave={() => handleSave('Company details')} label="Save Company Details" />
         </div>
       )}
 
@@ -389,8 +490,8 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                 </p>
                 <select
                   className="field"
-                  value={brand.defaultCurrency || 'INR'}
-                  onChange={e => onBrandChange({ ...brand, defaultCurrency: e.target.value as CurrencyCode })}
+                  value={draft.defaultCurrency || 'INR'}
+                  onChange={e => patch({ defaultCurrency: e.target.value as CurrencyCode })}
                 >
                   {CURRENCY_CODES.map(c => (
                     <option key={c} value={c}>{CURRENCY_META[c].symbol} {c} — {CURRENCY_META[c].label}</option>
@@ -404,8 +505,8 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                 </p>
                 <select
                   className="field"
-                  value={brand.baseCurrency || 'INR'}
-                  onChange={e => onBrandChange({ ...brand, baseCurrency: e.target.value as CurrencyCode })}
+                  value={draft.baseCurrency || 'INR'}
+                  onChange={e => patch({ baseCurrency: e.target.value as CurrencyCode })}
                 >
                   {CURRENCY_CODES.map(c => (
                     <option key={c} value={c}>{CURRENCY_META[c].symbol} {c} — {CURRENCY_META[c].label}</option>
@@ -430,10 +531,10 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                 </span>
               </div>
               <p style={{ fontSize: 11, color: 'var(--clr-text-subtle)', margin: '0 0 14px' }}>
-                Rates are entered manually today, one per currency, quoted against the base currency above (e.g. 1 USD = 96 {brand.baseCurrency || 'INR'}). Payroll amounts are never rewritten — only how they're displayed changes.
+                Rates are entered manually today, one per currency, quoted against the base currency above (e.g. 1 USD = 96 {draft.baseCurrency || 'INR'}). Payroll amounts are never rewritten — only how they're displayed changes.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-                {CURRENCY_CODES.filter(c => c !== (brand.baseCurrency || 'INR')).map(code => (
+                {CURRENCY_CODES.filter(c => c !== (draft.baseCurrency || 'INR')).map(code => (
                   <div key={code}>
                     <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--clr-text-muted)', display: 'block', marginBottom: 5 }}>
                       {CURRENCY_META[code].symbol} {code} — {CURRENCY_META[code].label}
@@ -445,18 +546,14 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
                         className="field"
                         min={0.0001}
                         step="0.01"
-                        value={brand.exchangeRates?.[code] ?? ''}
+                        value={draft.exchangeRates?.[code] ?? ''}
                         placeholder="e.g. 96"
                         onChange={e => {
                           const value = Number(e.target.value);
-                          onBrandChange({
-                            ...brand,
-                            exchangeRates: { ...brand.exchangeRates, [code]: value > 0 ? value : undefined },
-                            exchangeRateUpdatedAt: new Date().toISOString(),
-                          });
+                          patch({ exchangeRates: { ...draft.exchangeRates, [code]: value > 0 ? value : undefined } });
                         }}
                       />
-                      <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', fontWeight: 600 }}>{brand.baseCurrency || 'INR'}</span>
+                      <span style={{ fontSize: 12, color: 'var(--clr-text-muted)', fontWeight: 600 }}>{draft.baseCurrency || 'INR'}</span>
                     </div>
                   </div>
                 ))}
@@ -482,6 +579,8 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
               </p>
             </div>
           </Card>
+
+          <SaveBar dirty={isDirty} onSave={() => handleSave('Currency settings')} label="Save Currency Settings" />
         </div>
       )}
 
@@ -497,61 +596,65 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
       )}
 
       {tab === 'pdf' && (
-        <Card title="PDF Settings">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {brand.showSignatory ? (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Authorised Signatory</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                  <InlineInput label="Signatory Name" type="text" value={brand.signatoryName || ''}
-                    onChange={e => onBrandChange({ ...brand, signatoryName: e.target.value })} placeholder="e.g. Rajesh Kumar" />
-                  <InlineInput label="Signatory Title" type="text" value={brand.signatoryTitle || 'Authorised Signatory'}
-                    onChange={e => onBrandChange({ ...brand, signatoryTitle: e.target.value })} placeholder="Authorised Signatory" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="PDF Settings">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {draft.showSignatory ? (
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Authorised Signatory</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <InlineInput label="Signatory Name" type="text" value={draft.signatoryName || ''}
+                      onChange={e => patch({ signatoryName: e.target.value })} placeholder="e.g. Rajesh Kumar" />
+                    <InlineInput label="Signatory Title" type="text" value={draft.signatoryTitle || 'Authorised Signatory'}
+                      onChange={e => patch({ signatoryTitle: e.target.value })} placeholder="Authorised Signatory" />
+                  </div>
+                  <FieldLabel>Signature Image (optional)</FieldLabel>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {draft.signatoryImageUri && (
+                      <div style={{ position: 'relative' }}>
+                        <img src={draft.signatoryImageUri} alt="Signature" style={{ height: 36, width: 'auto', maxWidth: 120, objectFit: 'contain', borderRadius: 4, border: '1px solid var(--clr-border)', padding: 3, background: '#fff' }} />
+                        <button onClick={() => patch({ signatoryImageUri: null })} title="Remove signature"
+                          style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: '50%', background: '#374151', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <X size={8} />
+                        </button>
+                      </div>
+                    )}
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', border: '1.5px dashed var(--clr-border)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--clr-text-muted)' }}>
+                      <Upload size={11} />
+                      {draft.signatoryImageUri ? 'Change' : 'Upload Signature'}
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onloadend = () => patch({ signatoryImageUri: reader.result as string });
+                        reader.readAsDataURL(file);
+                      }} />
+                    </label>
+                  </div>
                 </div>
-                <FieldLabel>Signature Image (optional)</FieldLabel>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {brand.signatoryImageUri && (
-                    <div style={{ position: 'relative' }}>
-                      <img src={brand.signatoryImageUri} alt="Signature" style={{ height: 36, width: 'auto', maxWidth: 120, objectFit: 'contain', borderRadius: 4, border: '1px solid var(--clr-border)', padding: 3, background: '#fff' }} />
-                      <button onClick={() => onBrandChange({ ...brand, signatoryImageUri: null })} title="Remove signature"
-                        style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: '50%', background: '#374151', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                        <X size={8} />
-                      </button>
-                    </div>
-                  )}
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', border: '1.5px dashed var(--clr-border)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--clr-text-muted)' }}>
-                    <Upload size={11} />
-                    {brand.signatoryImageUri ? 'Change' : 'Upload Signature'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onloadend = () => onBrandChange({ ...brand, signatoryImageUri: reader.result as string });
-                      reader.readAsDataURL(file);
-                    }} />
-                  </label>
-                </div>
-              </div>
-            ) : (
-              <p style={{ fontSize: 12, color: 'var(--clr-text-subtle)' }}>
-                Enable "Show Authorised Signatory" under Display Options to set a signatory name, title, and signature image.
-              </p>
-            )}
+              ) : (
+                <p style={{ fontSize: 12, color: 'var(--clr-text-subtle)' }}>
+                  Enable "Show Authorised Signatory" under Display Options to set a signatory name, title, and signature image.
+                </p>
+              )}
 
-            <div style={{ borderTop: '1px solid var(--clr-border)', paddingTop: 16 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 6px' }}>Company Watermark</p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12.5, color: 'var(--clr-text)', fontWeight: 500 }}>
-                <input
-                  type="checkbox"
-                  checked={!!brand.showNameWatermark}
-                  onChange={e => onBrandChange({ ...brand, showNameWatermark: e.target.checked })}
-                  style={{ width: 13, height: 13, cursor: 'pointer', accentColor: brand.primaryColour }}
-                />
-                Show a faint company name watermark across the payslip
-              </label>
+              <div style={{ borderTop: '1px solid var(--clr-border)', paddingTop: 16 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--clr-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 6px' }}>Company Watermark</p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12.5, color: 'var(--clr-text)', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!draft.showNameWatermark}
+                    onChange={e => patch({ showNameWatermark: e.target.checked })}
+                    style={{ width: 13, height: 13, cursor: 'pointer', accentColor: draft.primaryColour }}
+                  />
+                  Show a faint company name watermark across the payslip
+                </label>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+
+          <SaveBar dirty={isDirty} onSave={() => handleSave('PDF settings')} label="Save PDF Settings" />
+        </div>
       )}
 
       {tab === 'google-drive' && (
@@ -656,21 +759,25 @@ export function CompanySettingsPage({ brand, onBrandChange, onResetBrand, errors
       )}
 
       {tab === 'display' && (
-        <Card title="Display Options">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
-            {DISPLAY_TOGGLES.map(({ key, label }) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12.5, color: 'var(--clr-text)', fontWeight: 500 }}>
-                <input
-                  type="checkbox"
-                  checked={!!brand[key]}
-                  onChange={e => onBrandChange({ ...brand, [key]: e.target.checked })}
-                  style={{ width: 13, height: 13, cursor: 'pointer', accentColor: brand.primaryColour }}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </Card>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="Display Options">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+              {DISPLAY_TOGGLES.map(({ key, label }) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12.5, color: 'var(--clr-text)', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!draft[key]}
+                    onChange={e => patch({ [key]: e.target.checked })}
+                    style={{ width: 13, height: 13, cursor: 'pointer', accentColor: draft.primaryColour }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </Card>
+
+          <SaveBar dirty={isDirty} onSave={() => handleSave('Display options')} label="Save Display Options" />
+        </div>
       )}
     </div>
   );

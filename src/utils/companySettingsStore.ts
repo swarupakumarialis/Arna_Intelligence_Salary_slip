@@ -38,6 +38,23 @@ export interface BrandConfig {
   signatoryName?: string;
   signatoryTitle?: string;
   signatoryImageUri?: string | null;
+  /** Company Bank Details — shown on the Salary Slip (screen preview +
+      PDF) next to "Amount in Words", the same way the Invoice module
+      shows its own Payment Information on an invoice. Kept independent
+      of modules/finance/utils/invoiceSettingsStore.ts's bank fields
+      (Invoice-specific, e.g. the account customers pay into) — this is
+      the account the Salary Slip itself surfaces, managed from Company
+      Settings since that's the page the Salary Generator already reads
+      everything else from. The account number is always masked
+      wherever it's displayed (see maskAccountNumber duplicated in
+      SalarySlipPreview.tsx / PDFEmployeeInfo.tsx). */
+  bankName?: string;
+  bankAccountHolder?: string;
+  bankAccountNumber?: string;
+  bankIfscCode?: string;
+  bankSwiftCode?: string;
+  bankUpiId?: string;
+  showBankDetails?: boolean;
   /* Display-only currency preference (see CurrencyContext / the
      reusable service at utils/currencyService.ts) — payroll is always
      calculated and stored in `baseCurrency`; these fields only control
@@ -85,6 +102,18 @@ export const DEFAULT_BRAND: BrandConfig = {
   signatoryName: '',
   signatoryTitle: 'Authorised Signatory',
   signatoryImageUri: null,
+  /** Sample placeholder — see the BrandConfig field comment above for
+      why these ship with a value rather than blank: an empty account
+      would just show "Not configured" on every payslip until someone
+      edits Company Settings, and the number is masked wherever it's
+      displayed regardless. Replace with the real account any time. */
+  bankName: 'HDFC Bank',
+  bankAccountHolder: 'Arnas Learning Intelligence Studio Pvt. Ltd.',
+  bankAccountNumber: '50100123456789',
+  bankIfscCode: 'HDFC0001234',
+  bankSwiftCode: '',
+  bankUpiId: 'billing@hdfcbank',
+  showBankDetails: true,
   defaultCurrency: 'INR',
   baseCurrency: 'INR',
   exchangeRates: { USD: 96 },

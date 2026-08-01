@@ -897,11 +897,18 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled, onDirt
         </div>
       )}
 
+      {/* Fixed side pop-up (top-right, below the header) rather than an
+          inline banner in the page flow — "Save as Draft"/"Generate
+          Invoice" sit at the bottom of a long form, so a confirmation
+          that only appeared inline up here could go unnoticed without
+          scrolling back up. Sits below the sticky top nav (80px) rather
+          than centered over it, so it never overlaps the header. */}
       {notice && (
         <div style={{
-          marginBottom: 16, padding: '10px 14px', borderRadius: 8,
-          background: '#F0FDFA', border: '1px solid #99F6E4',
-          fontSize: 12.5, fontWeight: 600, color: '#0F766E',
+          position: 'fixed', top: 96, right: 24, zIndex: 10001,
+          maxWidth: 360, padding: '12px 16px', borderRadius: 10,
+          background: '#0F766E', color: '#fff', fontSize: 12.5, fontWeight: 600,
+          boxShadow: '0 12px 32px rgba(15,23,42,0.28)',
         }}>
           {notice}
         </div>

@@ -54,12 +54,21 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   invoicePrefix: 'INV',
   defaultTaxPercent: 0,
   defaultCurrency: 'INR',
-  bankName: '',
-  accountHolder: '',
-  accountNumber: '',
-  ifscCode: '',
+  /** Sample placeholder bank details — Invoice Settings' "Payment
+      Information" card shipped with these fields blank, which meant a
+      brand-new invoice's footer just showed "Not configured" until
+      someone edited them. These give a fresh install something real to
+      show on an invoice out of the box; the account number is always
+      masked wherever it's displayed on an invoice (see
+      maskAccountNumber below), so shipping a sample value here is safe
+      either way — replace all of these with the real account in
+      Invoice Settings. */
+  bankName: 'HDFC Bank',
+  accountHolder: 'Arnas Learning Intelligence Studio Pvt. Ltd.',
+  accountNumber: '50100123456789',
+  ifscCode: 'HDFC0001234',
   swiftCode: '',
-  upiId: '',
+  upiId: 'billing@hdfcbank',
   qrCodeDataUri: null,
   defaultNotes: 'Thank you for your business.',
   defaultTerms:
@@ -90,6 +99,21 @@ export function saveInvoiceSettings(settings: InvoiceSettings): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Masks a bank account number for display on an invoice — every digit
+    except the last 4 becomes '•', grouped in 4s for readability (e.g.
+    "50100123456789" → "•••• •••• •• 6789"). Invoice Settings' own form
+    still shows/edits the real number (that's the one place it needs to
+    be legible to manage it); this is only for wherever the number is
+    shown on the invoice itself (InvoiceFooter.tsx / InvoicePdfFooter.tsx),
+    which goes out to customers. Short values (<=4 digits) are returned
+    as-is — nothing meaningful left to mask. */
+export function maskAccountNumber(accountNumber: string): string {
+  const digits = accountNumber.replace(/\D/g, '');
+  if (digits.length <= 4) return digits;
+  const masked = '•'.repeat(digits.length - 4) + digits.slice(-4);
+  return (masked.match(/.{1,4}/g) ?? [masked]).join(' ');
 }
 
 /** A sanitized prefix is always 2-6 uppercase letters — enforced here

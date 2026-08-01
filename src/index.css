@@ -320,10 +320,35 @@ select {
   max-width: 1360px;
   margin: 0 auto;
   padding: 0 24px;
+  transition: max-width var(--transition);
 }
 
 @media (min-width: 1920px) {
   .page-container { max-width: 1520px; }
+}
+
+/* Manually hiding the sidebar (TopNav's toggle, see .app-sidebar.collapsed
+   in the LAYOUT section below) frees up its ~216px, but .page-container's
+   fixed max-width previously ignored that and just left the freed space
+   empty on both sides instead of actually using it — the "utilise full
+   page for better visibility" fix. */
+.app-shell.sidebar-collapsed .page-container {
+  max-width: 1600px;
+}
+
+@media (min-width: 1920px) {
+  .app-shell.sidebar-collapsed .page-container { max-width: 1800px; }
+}
+
+/* Invoice Settings' own content column caps out well short of
+   .page-container's width regardless — same "hidden sidebar should
+   free up real width" fix, scoped to this page's inner wrapper. */
+.invoice-settings-shell {
+  max-width: 860px;
+  transition: max-width var(--transition);
+}
+.app-shell.sidebar-collapsed .invoice-settings-shell {
+  max-width: 1200px;
 }
 
 .main-grid {
@@ -517,24 +542,41 @@ select {
   min-width: 0;
 }
 
-.app-topnav-sidebar-toggle {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-sm);
+/* Sidebar collapse toggle — deliberately NOT in the top nav bar (per
+   explicit feedback). It floats at the sidebar/content boundary instead,
+   just below the header, so it's reachable whether the sidebar is
+   showing or hidden. left shifts via the .sidebar-collapsed variant
+   below and the <=900px icon-rail breakpoint, mirroring .app-sidebar's
+   own width at each state so the button always sits right at its edge. */
+.sidebar-toggle-fab {
+  position: fixed;
+  top: 96px;
+  left: 204px;
+  z-index: 45;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
   border: 1px solid var(--clr-border);
   background: var(--clr-surface);
   color: var(--clr-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14);
+  transition: left var(--transition), background var(--transition), color var(--transition), border-color var(--transition);
 }
-.app-topnav-sidebar-toggle:hover {
+.sidebar-toggle-fab:hover {
   background: var(--clr-hover);
   color: var(--brand-primary);
   border-color: var(--clr-border-hover);
+}
+.app-shell.sidebar-collapsed .sidebar-toggle-fab {
+  left: 12px;
+}
+@media (max-width: 900px) {
+  .sidebar-toggle-fab { left: 60px; }
+  .app-shell.sidebar-collapsed .sidebar-toggle-fab { left: 12px; }
 }
 
 .app-topnav-logo {

@@ -6,7 +6,7 @@ import { SalarySlipPDF } from './components/pdf/SalarySlipPDF';
 import { TopNav } from './components/layout/TopNav';
 import { Sidebar, SidebarKey } from './components/layout/Sidebar';
 import { Footer } from './components/layout/Footer';
-import { Download, Loader2, AlertTriangle, X, CheckCircle2, FileText } from 'lucide-react';
+import { Download, Loader2, AlertTriangle, X, CheckCircle2, FileText, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { defaultTaxConfigs } from './utils/taxCalculator';
@@ -267,12 +267,17 @@ export default function App() {
      (bank details, notes/terms, company identity) are just as easy to
      lose by clicking another sidebar item as an in-progress invoice. */
   const [invoiceSettingsDirty, setInvoiceSettingsDirty] = useState(false);
+  /* Same mechanism, reported by CompanySettingsPage's own onDirtyChange
+     — that page switched from auto-save-on-every-keystroke to an
+     explicit per-section Save button, so an in-progress edit there is
+     now real unsaved work that a sidebar click could silently discard. */
+  const [companySettingsDirty, setCompanySettingsDirty] = useState(false);
   /* Sidebar navigation the user asked for while a dirty form (Salary,
-     Invoice, or Invoice Settings) is on screen — held here until they
-     confirm via the Unsaved Changes dialog below, rather than switching
-     immediately. */
+     Invoice, Invoice Settings, or Company Settings) is on screen — held
+     here until they confirm via the Unsaved Changes dialog below,
+     rather than switching immediately. */
   const [pendingNavKey, setPendingNavKey] = useState<SidebarKey | null>(null);
-  const [unsavedDialogSource, setUnsavedDialogSource] = useState<'salary' | 'invoice' | 'invoice-settings' | null>(null);
+  const [unsavedDialogSource, setUnsavedDialogSource] = useState<'salary' | 'invoice' | 'invoice-settings' | 'company-settings' | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   /* Points at the dedicated SalarySlipPDF instance (rendered off-screen,
      always mounted — see the JSX below) rather than the on-screen
@@ -521,13 +526,19 @@ export default function App() {
     const leavingDirtySalary = activePage === 'generator' && key !== 'generator' && salaryDirty;
     const leavingDirtyInvoice = activePage === 'invoice-generator' && key !== 'invoice-generator' && invoiceDirty;
     const leavingDirtyInvoiceSettings = activePage === 'invoice-settings' && key !== 'invoice-settings' && invoiceSettingsDirty;
-    if (leavingDirtySalary || leavingDirtyInvoice || leavingDirtyInvoiceSettings) {
-      setUnsavedDialogSource(leavingDirtyInvoice ? 'invoice' : leavingDirtyInvoiceSettings ? 'invoice-settings' : 'salary');
+    const leavingDirtyCompanySettings = activePage === 'settings' && key !== 'settings' && companySettingsDirty;
+    if (leavingDirtySalary || leavingDirtyInvoice || leavingDirtyInvoiceSettings || leavingDirtyCompanySettings) {
+      setUnsavedDialogSource(
+        leavingDirtyInvoice ? 'invoice'
+          : leavingDirtyInvoiceSettings ? 'invoice-settings'
+          : leavingDirtyCompanySettings ? 'company-settings'
+          : 'salary'
+      );
       setPendingNavKey(key);
       return;
     }
     commitNavigate(key);
-  }, [activePage, salaryDirty, invoiceDirty, invoiceSettingsDirty, commitNavigate]);
+  }, [activePage, salaryDirty, invoiceDirty, invoiceSettingsDirty, companySettingsDirty, commitNavigate]);
 
   const handleCancelUnsavedNav = useCallback(() => {
     setPendingNavKey(null);
@@ -1059,7 +1070,7 @@ export default function App() {
       exchangeRates={brand.exchangeRates || {}}
       onCurrencyChange={(c: CurrencyCode) => setBrand({ ...brand, defaultCurrency: c })}
     >
-    <div className="app-shell" style={{ background: 'var(--clr-bg)' }}>
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} style={{ background: 'var(--clr-bg)' }}>
 
       {pdfError && (
         <div style={{
@@ -1216,6 +1227,8 @@ export default function App() {
                     ? "This invoice hasn't been saved yet. Switching pages now will lose your changes."
                     : unsavedDialogSource === 'invoice-settings'
                     ? "These invoice settings haven't been saved yet. Switching pages now will lose your changes."
+                    : unsavedDialogSource === 'company-settings'
+                    ? "These company settings haven't been saved yet. Switching pages now will lose your changes."
                     : "This payslip hasn't been exported yet. Switching pages now will lose your changes."}
                 </div>
               </div>
@@ -1272,9 +1285,20 @@ export default function App() {
         appName={APP_NAME}
         periodLabel={getCurrentPeriodLabel()}
         onLogout={logout}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed(v => !v)}
       />
+
+      {/* Sidebar collapse toggle — floats at the sidebar/content boundary
+          instead of living in the top nav bar, so it's reachable in
+          either state without cluttering the header. */}
+      <button
+        className="sidebar-toggle-fab"
+        onClick={() => setSidebarCollapsed(v => !v)}
+        title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        aria-pressed={sidebarCollapsed}
+      >
+        {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+      </button>
 
       <div className="app-body">
         <Sidebar
@@ -1488,6 +1512,7 @@ export default function App() {
                   touched={touchedFields}
                   onBlurField={handleBlurField}
                   onSettingsChanged={handleSettingsChanged}
+                  onDirtyChange={setCompanySettingsDirty}
                 />
               </Suspense>
             </div>

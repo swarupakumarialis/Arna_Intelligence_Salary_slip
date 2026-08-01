@@ -16,6 +16,11 @@ const IconBriefcase = ({ c }: { c: string }) => (
     <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
   </svg>
 );
+const IconBank = ({ c }: { c: string }) => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"/>
+  </svg>
+);
 const IcoGstin = () => (
   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="13" y2="13"/>
@@ -47,6 +52,18 @@ interface Props {
   previewRef: React.RefObject<HTMLDivElement | null>;
   taxConfig?: TaxConfig;
   brand: BrandConfig;
+}
+
+/** Masks all but the last 4 digits of a bank account number — same
+    convention as the Invoice module's own maskAccountNumber
+    (invoiceSettingsStore.ts) and PDFEmployeeInfo.tsx's copy of it,
+    duplicated here rather than cross-imported since Salary and Invoice
+    are kept independent of each other elsewhere in this app. */
+function maskAccountNumber(accountNumber: string): string {
+  const digits = accountNumber.replace(/\D/g, '');
+  if (digits.length <= 4) return digits;
+  const masked = '•'.repeat(digits.length - 4) + digits.slice(-4);
+  return (masked.match(/.{1,4}/g) ?? [masked]).join(' ');
 }
 
 /* Structural lines/dividers are neutral gray, not brand-coloured — this
@@ -94,6 +111,19 @@ export function SalarySlipPreview({ data, previewRef, taxConfig, brand }: Props)
   const hasEmail   = showEmail   && !!brand.email?.trim();
   const hasPhone   = showPhone   && !!brand.phone?.trim();
   const hasContact = hasGstin || hasPan || hasWebsite || hasEmail || hasPhone;
+
+  /* Company Bank Details — see BrandConfig's field comment
+     (companySettingsStore.ts) for why this lives on Company Settings
+     rather than Invoice Settings' own separate bank fields. */
+  const bankFields: [string, string][] = [
+    ['Bank', brand.bankName || ''],
+    ['Holder', brand.bankAccountHolder || ''],
+    ['A/C No.', maskAccountNumber(brand.bankAccountNumber || '')],
+    ['IFSC', brand.bankIfscCode || ''],
+    ['SWIFT', brand.bankSwiftCode || ''],
+    ['UPI', brand.bankUpiId || ''],
+  ].filter(([, v]) => v.trim()) as [string, string][];
+  const showBankDetails = (brand.showBankDetails ?? true) && bankFields.length > 0;
 
   const companyAddressJoined = companyAddress
     .split(/\n+/)
@@ -284,7 +314,7 @@ export function SalarySlipPreview({ data, previewRef, taxConfig, brand }: Props)
           </div>
         </div>
 
-        {/* ── EMPLOYEE INFORMATION — two equal columns, label:value ── */}
+        {/* ── EMPLOYEE INFORMATION — three equal columns, label:value ── */}
         <div style={{ display: 'flex', marginBottom: 9, flexShrink: 0, border: `1px solid ${LINE}`, borderRadius: 4 }}>
           {([
             {
@@ -306,7 +336,17 @@ export function SalarySlipPreview({ data, previewRef, taxConfig, brand }: Props)
                 ['Paid Days', String(data.salary.paidDays)],
                 ['LOP Days', String(data.salary.lopDays)],
               ] as [string, string][],
-              lw: 100,
+              lw: 82,
+            },
+            {
+              title: 'Bank Details',
+              Icon: IconBank,
+              rows: [
+                ['Bank', data.employee.bankName || ''],
+                ['A/C No.', maskAccountNumber(data.employee.bankAccount || '')],
+                ['IFSC', data.employee.ifscCode || ''],
+              ] as [string, string][],
+              lw: 54,
             },
           ]).map((card, ci) => (
             <div key={card.title} style={{
@@ -404,15 +444,33 @@ export function SalarySlipPreview({ data, previewRef, taxConfig, brand }: Props)
           </div>
         </div>
 
-        {/* ── AMOUNT IN WORDS — subtle bordered strip, one line ── */}
-        <div style={{
-          border: `1px solid ${LINE}`, borderRadius: 4, padding: '8px 14px', marginBottom: 9,
-          display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0, flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', flexShrink: 0 }}>
-            Amount in Words
-          </span>
-          <span style={{ fontSize: '8.5pt', fontWeight: 600, color: '#1F2937' }}>{netPayWords}</span>
+        {/* ── AMOUNT IN WORDS + COMPANY BANK DETAILS — side by side, not
+             stacked, so Bank Details never grows the page's height. ── */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 9, flexShrink: 0 }}>
+          <div style={{
+            flex: 1, border: `1px solid ${LINE}`, borderRadius: 4, padding: '8px 14px',
+            display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', flexShrink: 0 }}>
+              Amount in Words
+            </span>
+            <span style={{ fontSize: '8.5pt', fontWeight: 600, color: '#1F2937' }}>{netPayWords}</span>
+          </div>
+          {showBankDetails && (
+            <div style={{ flex: 1, border: `1px solid ${LINE}`, borderRadius: 4, padding: '8px 14px' }}>
+              <div style={{ fontSize: '6.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8', marginBottom: 3 }}>
+                Company Bank Details
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 12, rowGap: 1 }}>
+                {bankFields.map(([label, value]) => (
+                  <span key={label} style={{ fontSize: '7.5pt', color: '#1F2937' }}>
+                    <span style={{ color: '#94A3B8', fontWeight: 600 }}>{label}: </span>
+                    <span style={{ fontWeight: 600, fontFamily: 'ui-monospace, monospace' }}>{value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── FOOTER ──────────────────────────────────────────── */}

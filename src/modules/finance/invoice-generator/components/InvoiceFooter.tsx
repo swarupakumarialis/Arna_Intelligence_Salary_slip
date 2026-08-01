@@ -1,6 +1,6 @@
 import React from 'react';
 import { QrCode } from 'lucide-react';
-import { InvoiceSettings } from '../../utils/invoiceSettingsStore';
+import { InvoiceSettings, maskAccountNumber } from '../../utils/invoiceSettingsStore';
 
 interface Props {
   settings: InvoiceSettings;
@@ -32,7 +32,7 @@ export function InvoiceFooter({ settings, accentColor, notes, terms }: Props) {
   const bankFields: [string, string][] = [
     ['Bank', settings.bankName],
     ['Holder', settings.accountHolder],
-    ['A/C No.', settings.accountNumber],
+    ['A/C No.', maskAccountNumber(settings.accountNumber)],
     ['IFSC', settings.ifscCode],
     ['SWIFT', settings.swiftCode],
     ['UPI', settings.upiId],
