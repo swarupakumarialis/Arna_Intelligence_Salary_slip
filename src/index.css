@@ -345,6 +345,7 @@ select {
    free up real width" fix, scoped to this page's inner wrapper. */
 .invoice-settings-shell {
   max-width: 860px;
+  margin: 0 auto;
   transition: max-width var(--transition);
 }
 .app-shell.sidebar-collapsed .invoice-settings-shell {

@@ -387,8 +387,8 @@ function validateInvoiceForm(
   items.forEach((item) => {
     const rowErrors: ItemErrors = {};
     if (!item.description.trim()) rowErrors.description = 'Description is required.';
-    if (!(Number(item.quantity) > 0)) rowErrors.quantity = 'Must be greater than 0.';
-    if (!(Number(item.unitPrice) > 0)) rowErrors.unitPrice = 'Must be greater than 0.';
+    if (!(Number(item.quantity) > 0)) rowErrors.quantity = 'Must be > 0.';
+    if (!(Number(item.unitPrice) > 0)) rowErrors.unitPrice = 'Must be > 0.';
     if (Object.keys(rowErrors).length > 0) itemErrors[item.id] = rowErrors;
   });
   if (items.length === 0) errors.items = 'Add at least one item.';

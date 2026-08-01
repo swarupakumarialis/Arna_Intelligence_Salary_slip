@@ -1053,11 +1053,10 @@ export default function App() {
     setActivityLog(logActivity('payroll_exported', `${month} ${year}`, format));
   }, []);
 
-  /* Company Settings has no explicit "Save" step — every field is
-     already live-saved on change (see setBrand). Logging every
-     keystroke would flood the activity feed, so instead the page
-     itself reports one summary event when it's left, only if
-     something actually changed while it was open. */
+  /* Company Settings now has an explicit per-section Save step (each
+     tab's SaveBar) rather than saving on every keystroke — the page
+     itself calls this once per actual Save click, only when something
+     in the draft actually differs from what was already saved. */
   const handleSettingsChanged = useCallback(() => {
     setActivityLog(logActivity('company_settings_changed', 'Company Settings', 'Branding or company details updated'));
   }, []);
