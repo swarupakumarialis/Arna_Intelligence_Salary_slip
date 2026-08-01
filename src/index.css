@@ -545,13 +545,18 @@ select {
 
 /* Sidebar collapse toggle — deliberately NOT in the top nav bar (per
    explicit feedback). It floats at the sidebar/content boundary instead,
-   just below the header, so it's reachable whether the sidebar is
-   showing or hidden. left shifts via the .sidebar-collapsed variant
-   below and the <=900px icon-rail breakpoint, mirroring .app-sidebar's
-   own width at each state so the button always sits right at its edge. */
+   vertically centered in the viewport rather than pinned near the top,
+   so it's reachable whether the sidebar is showing or hidden without
+   ever overlapping a page's breadcrumb/title (every page's own content
+   starts right under the header — a fixed top offset here collided with
+   it on every single page, not just one). left shifts via the
+   .sidebar-collapsed variant below and the <=900px icon-rail breakpoint,
+   mirroring .app-sidebar's own width at each state so the button always
+   sits right at its edge. */
 .sidebar-toggle-fab {
   position: fixed;
-  top: 96px;
+  top: 50%;
+  transform: translateY(-50%);
   left: 204px;
   z-index: 45;
   width: 30px;

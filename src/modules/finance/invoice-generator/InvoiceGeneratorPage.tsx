@@ -52,6 +52,11 @@ interface Props {
       from 'invoice-generator', unlike the Salary Generator whose form
       state lives in App.tsx and survives a page switch. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Whether the sidebar is currently manually hidden (App.tsx's own
+      state) — used to default the Live Preview zoom to 100% when it's
+      hidden (more room) and 75% when it's shown, the same way the
+      Salary Generator's own Live Preview behaves. */
+  sidebarCollapsed?: boolean;
 }
 
 /**
@@ -403,7 +408,7 @@ function validateInvoiceForm(
     View mode just locks the form visually and swaps the footer actions
     for a single "Edit Invoice" button; Edit mode is Create's same
     save flow, routed to PUT instead of POST because `savedId` is set. */
-export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled, onDirtyChange }: Props = {}) {
+export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled, onDirtyChange, sidebarCollapsed }: Props = {}) {
   const [customer, setCustomer] = useState<CustomerDetails>(emptyCustomerDetails);
   const [invoice, setInvoice] = useState<InvoiceDetails>(defaultInvoiceDetails);
   const [items, setItems] = useState<InvoiceItem[]>([createBlankInvoiceItem()]);
@@ -453,6 +458,19 @@ export function InvoiceGeneratorPage({ openRequest, onOpenRequestHandled, onDirt
   const [zoomMode, setZoomMode] = useState<'fixed' | 'fit'>('fixed');
   const [previewScale, setPreviewScale] = useState(0.75);
   const shellRef = useRef<HTMLDivElement>(null);
+
+  /* Hiding the sidebar frees up real width, so the Live Preview should
+     make use of it immediately — 90% instead of the normal 75% default,
+     and back to 75% once the sidebar is shown again. Only applies in
+     'fixed' zoom mode; 'fit' already recomputes against the shell's
+     actual size via its own ResizeObserver (see recalcFit below), so
+     this would just fight that. Same behaviour as the Salary Generator's
+     own Live Preview in App.tsx. */
+  useEffect(() => {
+    if (zoomMode !== 'fixed') return;
+    setPreviewScale(sidebarCollapsed ? 0.9 : 0.75);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarCollapsed]);
 
   const patchCustomer = (patch: Partial<CustomerDetails>) => setCustomer(prev => ({ ...prev, ...patch }));
   const patchInvoice = (patch: Partial<InvoiceDetails>) => setInvoice(prev => ({ ...prev, ...patch }));

@@ -250,6 +250,17 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('arna_sidebar_collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [sidebarCollapsed]);
+  /* Hiding the sidebar frees up real width, so the Live Preview should
+     make use of it immediately — 90% instead of the normal 75% default,
+     and back to 75% once the sidebar is shown again. Only applies in
+     'fixed' zoom mode; Fit Width/Fit Page already recompute against the
+     shell's actual size via their own ResizeObserver (see recalcFit
+     below), so this would just fight that. */
+  useEffect(() => {
+    if (zoomMode !== 'fixed') return;
+    setPreviewScale(sidebarCollapsed ? 0.9 : 0.75);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarCollapsed]);
   /* Sprint 4 — the one piece of Invoice-module state App.tsx lifts, so
      Invoice History can tell the Invoice Generator "open invoice X in
      edit/view mode" despite there being no URL router to carry that as
@@ -1524,6 +1535,7 @@ export default function App() {
                   openRequest={invoiceOpenRequest}
                   onOpenRequestHandled={() => setInvoiceOpenRequest(null)}
                   onDirtyChange={setInvoiceDirty}
+                  sidebarCollapsed={sidebarCollapsed}
                 />
               </Suspense>
             </div>
