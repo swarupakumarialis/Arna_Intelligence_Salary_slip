@@ -585,6 +585,95 @@ select {
   .app-shell.sidebar-collapsed .sidebar-toggle-fab { left: 12px; }
 }
 
+/* ── AI Assistant — global floating button + drawer (Sprint 9) ──────
+   Mounted once at the App shell root (see App.tsx), not inside any
+   activePage branch, so it's present — and stays open — on every page.
+   z-index sits below the app's genuine action modals (Email/Unsaved
+   Changes/etc. all use 10000+) so an actual modal still takes priority
+   over the assistant if both happen to be open. */
+.ai-widget-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9500;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #0B5D55 0%, #0F766E 55%, var(--arna-teal) 100%);
+  background-size: 200% 200%;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px color-mix(in srgb, #0F766E 45%, transparent);
+  transition: transform 200ms ease, box-shadow 200ms ease, background-position 400ms ease;
+  animation: aiWidgetFabGradient 6s ease infinite;
+}
+.ai-widget-fab svg {
+  animation: aiWidgetIconFloat 2.4s ease-in-out infinite;
+}
+.ai-widget-fab:hover {
+  transform: scale(1.1);
+  background-position: 100% 50%;
+  box-shadow: 0 12px 32px color-mix(in srgb, #0F766E 60%, transparent);
+}
+.ai-widget-fab:hover svg {
+  animation-play-state: paused;
+  transform: scale(1.08);
+}
+
+@keyframes aiWidgetFabGradient {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes aiWidgetIconFloat {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-6deg); }
+}
+
+.ai-widget-panel {
+  position: fixed;
+  bottom: 92px;
+  right: 24px;
+  z-index: 9500;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  height: 560px;
+  max-height: calc(100vh - 120px);
+  background: var(--clr-surface);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: aiWidgetPanelIn 180ms ease-out both;
+}
+
+@keyframes aiWidgetPanelIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.ai-widget-header {
+  flex-shrink: 0;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #0B5D55 0%, #0F766E 60%, var(--arna-teal) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ai-widget-header-icon {
+  animation: aiWidgetIconFloat 2.4s ease-in-out infinite;
+}
+
+@media (max-width: 480px) {
+  .ai-widget-panel { right: 16px; left: 16px; width: auto; bottom: 88px; }
+  .ai-widget-fab { right: 16px; bottom: 16px; }
+}
+
 .app-topnav-logo {
   /* Wide box — matches the logo artwork's real aspect ratio (a
      horizontal icon + wordmark lockup, not a square mark), so

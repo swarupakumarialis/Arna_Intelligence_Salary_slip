@@ -5,6 +5,7 @@ import { SalarySlipPreview } from './components/SalarySlipPreview';
 import { SalarySlipPDF } from './components/pdf/SalarySlipPDF';
 import { TopNav } from './components/layout/TopNav';
 import { Sidebar, SidebarKey } from './components/layout/Sidebar';
+import { AiAssistantWidget } from './components/ai/AiAssistantWidget';
 import { Footer } from './components/layout/Footer';
 import { Download, Loader2, AlertTriangle, X, CheckCircle2, FileText, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import html2canvas from 'html2canvas';
@@ -1453,6 +1454,7 @@ export default function App() {
             </div>
           )}
 
+
           {activePage === 'directory' && (
             <div className="page-container app-page">
               <Suspense fallback={<PageLoadingFallback />}>
@@ -1560,6 +1562,16 @@ export default function App() {
           <Footer />
         </main>
       </div>
+
+      {/* Sprint 9 — global floating AI Assistant. Mounted once here,
+          outside every activePage-conditional block above, so it never
+          unmounts on navigation: its own open/closed state and chat
+          history simply carry through as the user moves between pages.
+          `activePage` is passed through (Sprint 10) purely so the
+          widget can swap its suggested-question chips for ones
+          relevant to whatever screen the user is currently on —
+          nothing else about the widget depends on it. */}
+      <AiAssistantWidget activePage={activePage} />
     </div>
     </CurrencyProvider>
     </ProtectedRoute>

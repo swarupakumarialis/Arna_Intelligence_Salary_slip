@@ -10,6 +10,7 @@ import pdfStorageRoutes from './routes/pdfStorage.routes.js';
 import emailRoutes from './routes/email.routes.js';
 import googleDriveRoutes from './routes/googleDrive.routes.js';
 import invoiceRoutes from './routes/invoice.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 
 /**
  * Express app configuration — separated from server.js (which owns
@@ -57,6 +58,10 @@ app.use('/api/integrations/google-drive', googleDriveRoutes);
 /* Sprint 4 — Invoice module (Finance section). A completely independent
    collection/route from Employee/SalaryHistory; see models/Invoice.js. */
 app.use('/api/invoices', invoiceRoutes);
+/* Sprint 8 — AI Assistant (Version 1, read-only). See services/ai.service.js
+   for the intent-detection → existing-service → structured-JSON → AI-
+   formats-response pipeline this route triggers. */
+app.use('/api/ai', aiRoutes);
 
 // Future feature routers (auth, …) mount here, above notFound/errorHandler.
 

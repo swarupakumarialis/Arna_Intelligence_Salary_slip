@@ -21,10 +21,15 @@ function paginationMeta({ total, page, limit }) {
     and customer/company — same shape as salaryHistory.service.js's
     buildQuery. dateFrom/dateTo filter on invoiceDate (stored as a
     plain 'YYYY-MM-DD' string, same as the frontend's date input value,
-    so a lexicographic $gte/$lte range comparison is correct). */
+    so a lexicographic $gte/$lte range comparison is correct). status
+    also accepts an array (Sprint 8, AI Assistant — "unpaid" spans
+    Sent/Overdue/Partially Paid, which no single status value can
+    express) and is translated to $in; every existing caller still
+    passes a single string or omits it, so this is purely additive. */
 function buildQuery({ status, currency, q, dateFrom, dateTo }) {
   const query = {};
-  if (status) query.status = status;
+  if (Array.isArray(status) && status.length) query.status = { $in: status };
+  else if (status) query.status = status;
   if (currency) query.currency = currency;
   if (dateFrom || dateTo) {
     query.invoiceDate = {};
@@ -99,6 +104,62 @@ export async function getAllInvoices({ page = 1, limit = 50, status, currency, q
     Invoice.countDocuments(query),
   ]);
   return { items, ...paginationMeta({ total, page, limit }) };
+}
+
+/** Read-only count + amount summary for a set of statuses/date range —
+    reuses buildQuery exactly like getAllInvoices does (status may be a
+    single value or an array, see buildQuery above), no separate query
+    logic. Added for the AI Assistant (Sprint 8): "How many invoices
+    are unpaid?", "outstanding amount", "highest unpaid invoice" all
+    need count/sum/max over a filtered set rather than one page of
+    results. Sums are grouped by currency (amountsByCurrency) rather
+    than blended into one number — invoices aren't all necessarily in
+    the same currency, and adding e.g. INR and USD totals together
+    would be meaningless. `items` is sorted by grandTotal descending,
+    so `items[0]` is always the largest matching invoice. */
+export async function getInvoiceSummary({ status, dateFrom, dateTo } = {}) {
+  const query = buildQuery({ status, dateFrom, dateTo });
+  const items = await Invoice
+    .find(query)
+    .select('invoiceNumber customer grandTotal currency status invoiceDate dueDate')
+    .sort({ grandTotal: -1 });
+  const amountsByCurrency = {};
+  for (const inv of items) {
+    const currency = inv.currency || 'INR';
+    amountsByCurrency[currency] = (amountsByCurrency[currency] || 0) + (inv.grandTotal || 0);
+  }
+  return { count: items.length, amountsByCurrency, largest: items[0] || null, items };
+}
+
+/** Read-only status breakdown across ALL invoices — count per status
+    plus the outstanding (Sent + Overdue + Partially Paid) amount by
+    currency. Added for the AI Assistant's "Invoice Summary" response
+    (Paid: N / Unpaid: N / Overdue: N / Outstanding Amount: ...) —
+    getInvoiceSummary() above already answers "how many/how much for
+    ONE status filter"; this answers "give me every status's count in
+    one shot" without N separate queries. Same UNPAID_INVOICE_STATUSES
+    definition as ai/intents.js (Sent/Overdue/Partially Paid) — kept as
+    a local literal rather than importing the AI layer's constant into
+    a general-purpose service file. */
+const UNPAID_STATUSES = ['Sent', 'Overdue', 'Partially Paid'];
+
+export async function getInvoiceStatusBreakdown() {
+  const rows = await Invoice.aggregate([
+    { $group: { _id: { status: '$status', currency: '$currency' }, count: { $sum: 1 }, total: { $sum: '$grandTotal' } } },
+  ]);
+  const byStatus = {};
+  const outstandingByCurrency = {};
+  let totalCount = 0;
+  for (const row of rows) {
+    const status = row._id.status;
+    const currency = row._id.currency || 'INR';
+    byStatus[status] = (byStatus[status] || 0) + row.count;
+    totalCount += row.count;
+    if (UNPAID_STATUSES.includes(status)) {
+      outstandingByCurrency[currency] = (outstandingByCurrency[currency] || 0) + row.total;
+    }
+  }
+  return { totalCount, byStatus, outstandingByCurrency };
 }
 
 export async function getInvoiceById(id) {

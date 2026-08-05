@@ -43,6 +43,34 @@ export async function getAllSalaryHistory({ page = 1, limit = 50, month, year, e
   return { items, ...paginationMeta({ total, page, limit }) };
 }
 
+/** Read-only summary for a given month/year — reuses buildQuery exactly
+    like getAllSalaryHistory does, no separate query logic. Added for
+    the AI Assistant (Sprint 8): "Payroll generated this month", "Total
+    payroll this month", "Salary emails sent/pending". emailStatus has
+    no default on the model (see backend/src/models/SalaryHistory.js) —
+    a record that's never been emailed simply has no emailStatus field
+    at all, so "pending" is defined as "not exactly 'Sent'" rather than
+    checking for a specific pending value. totalNetSalary is a single
+    number (unlike Invoice's per-currency split) because payroll is
+    always calculated and stored in the app's one configured base
+    currency — SalaryHistory records don't carry a currency field. */
+export async function getSalaryHistorySummary({ month, year } = {}) {
+  const query = buildQuery({ month, year });
+  const records = await SalaryHistory.find(query).select('employeeId department netSalary emailStatus');
+  const totalNetSalary = records.reduce((sum, r) => sum + (r.netSalary || 0), 0);
+  const emailsSent = records.filter((r) => r.emailStatus === 'Sent').length;
+  const employeeIds = new Set(records.map((r) => r.employeeId).filter(Boolean));
+  const departments = new Set(records.map((r) => r.department).filter(Boolean));
+  return {
+    count: records.length,
+    totalNetSalary,
+    emailsSent,
+    emailsPending: records.length - emailsSent,
+    employeeCount: employeeIds.size,
+    departmentCount: departments.size,
+  };
+}
+
 export async function getSalaryHistoryById(id) {
   assertValidId(id);
   const record = await SalaryHistory.findById(id);
