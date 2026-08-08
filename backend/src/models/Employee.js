@@ -97,6 +97,16 @@ const employeeSchema = new mongoose.Schema(
     emergencyContact: { type: String, trim: true, default: '' },
     employmentEndDate: { type: String, trim: true, default: '' },
     notes: { type: String, trim: true, default: '' },
+
+    /** Sprint 9 (Gemini integration + demo data) — the ONLY change to
+        this file. Set to 'ARNA_DEMO' exclusively by
+        scripts/seedDemoData.js, so its paired scripts/removeDemoData.js
+        can delete ONLY demo records via a precise
+        { source: 'ARNA_DEMO' } filter — never a broad, unscoped
+        deleteMany() that risks real company data. Every real employee
+        — anything created through the app itself — simply omits this
+        field (null), so it can never match that filter. */
+    source: { type: String, default: null },
   },
   { timestamps: true }
 );

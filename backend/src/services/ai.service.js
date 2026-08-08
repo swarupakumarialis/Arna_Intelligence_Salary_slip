@@ -3,8 +3,9 @@ import * as invoiceService from './invoice.service.js';
 import * as salaryHistoryService from './salaryHistory.service.js';
 import * as storageService from './storage/storageService.js';
 import { verifyEmailTransporter } from './email.service.js';
-import { getAIProvider } from './ai/providerFactory.js';
+import { getAIProvider, getFallbackProvider } from './ai/providerFactory.js';
 import { INTENT, UNPAID_INVOICE_STATUSES, LIST_CAPABLE_INTENTS } from './ai/intents.js';
+import { isBlockedAction } from './ai/guard.js';
 
 /** Hard ceiling on how many records a "show all"/"name them" follow-up
     (INTENT.FOLLOW_UP_LIST) can return in one reply — "full list" still
@@ -331,6 +332,51 @@ async function resolveData(intent, entities, context, options = {}) {
   }
 }
 
+/** Logged when the configured provider (e.g. Gemini) fails and
+    ai.service.js falls back to RuleBasedProvider (Sprint 9 Part 6) —
+    `err.message` only, never the error object itself, so a stray
+    header/body dump from a failed HTTP call to a vendor API can never
+    end up in server logs. GeminiProvider.js never puts the API key
+    into any error message it throws, so there is nothing secret here
+    to redact in the first place. */
+function logProviderFallback(stage, err) {
+  console.warn(`[ai.service] ${stage} failed on the configured AI provider — falling back to RuleBasedProvider: ${err?.message || err}`);
+}
+
+/** Runs detectIntent on `provider`; on ANY failure (missing API key,
+    network error, timeout, invalid structured output — see
+    GeminiProvider.js's generateJson) transparently retries on the
+    always-available RuleBasedProvider instead, so a misconfigured or
+    unreachable LLM provider never breaks the assistant (Sprint 9 Part
+    6 — "the application must continue working"). Returns which
+    provider actually answered so formatResponse below is asked on the
+    SAME provider, not a mismatched pairing. */
+async function detectIntentWithFallback(provider, trimmed, extra) {
+  try {
+    return { result: await provider.detectIntent(trimmed, extra), provider };
+  } catch (err) {
+    logProviderFallback('detectIntent', err);
+    const fallback = getFallbackProvider();
+    return { result: await fallback.detectIntent(trimmed, extra), provider: fallback };
+  }
+}
+
+/** Same fallback contract as detectIntentWithFallback, for the
+    formatResponse half of the pipeline — e.g. Gemini classified the
+    question fine but then the format call itself times out. Guards
+    against retrying forever: if `provider` already IS the fallback,
+    a second failure just propagates. */
+async function formatResponseWithFallback(provider, intent, data, trimmed) {
+  try {
+    return await provider.formatResponse(intent, data, trimmed);
+  } catch (err) {
+    const fallback = getFallbackProvider();
+    if (provider === fallback) throw err;
+    logProviderFallback('formatResponse', err);
+    return fallback.formatResponse(intent, data, trimmed);
+  }
+}
+
 /**
  * @param {string} question - the user's raw natural-language question
  * @param {object} [context] - optional frontend-supplied context (the
@@ -348,13 +394,23 @@ async function resolveData(intent, entities, context, options = {}) {
  */
 export async function ask(question, context = {}, previous) {
   const trimmed = String(question || '').trim();
-  const provider = getAIProvider();
 
   if (!trimmed) {
     return { intent: INTENT.UNKNOWN, entities: {}, data: null, message: 'Please ask a question — try one of the suggestions above.' };
   }
 
-  const { intent, entities } = await provider.detectIntent(trimmed, { previous });
+  // Read-only guard — checked before ANY provider runs (see ./ai/guard.js's
+  // file comment). This is what makes "must never modify data" true
+  // regardless of which provider is configured (RuleBasedProvider or
+  // an LLM like Gemini, Sprint 9 Part 5): a question that reads as an
+  // action never even reaches detectIntent().
+  if (isBlockedAction(trimmed)) {
+    return { intent: INTENT.BLOCKED_ACTION, entities: {}, data: null, message: BLOCKED_MESSAGE };
+  }
+
+  const configuredProvider = getAIProvider();
+  const { result: detected, provider } = await detectIntentWithFallback(configuredProvider, trimmed, { previous });
+  const { intent, entities } = detected;
 
   if (intent === INTENT.BLOCKED_ACTION) {
     return { intent, entities: {}, data: null, message: BLOCKED_MESSAGE };
@@ -363,17 +419,17 @@ export async function ask(question, context = {}, previous) {
   if (intent === INTENT.FOLLOW_UP_LIST) {
     if (previous && LIST_CAPABLE_INTENTS.includes(previous.intent)) {
       const data = await resolveData(previous.intent, previous.entities || {}, context, { full: true });
-      const message = await provider.formatResponse(previous.intent, data, trimmed);
+      const message = await formatResponseWithFallback(provider, previous.intent, data, trimmed);
       // Returned as the ORIGINAL intent (not follow_up_list) so a
       // second follow-up in a row ("name them" → "show all") still has
       // a valid, list-capable `previous` to chain from.
       return { intent: previous.intent, entities: previous.entities || {}, data, message };
     }
-    const message = await provider.formatResponse(INTENT.FOLLOW_UP_LIST, null, trimmed);
+    const message = await formatResponseWithFallback(provider, INTENT.FOLLOW_UP_LIST, null, trimmed);
     return { intent, entities: {}, data: null, message };
   }
 
   const data = await resolveData(intent, entities || {}, context, {});
-  const message = await provider.formatResponse(intent, data, trimmed);
+  const message = await formatResponseWithFallback(provider, intent, data, trimmed);
   return { intent, entities: entities || {}, data, message };
 }

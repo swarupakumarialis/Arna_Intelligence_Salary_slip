@@ -61,6 +61,11 @@ const salaryHistorySchema = new mongoose.Schema(
     emailStatus: { type: String, enum: ['Pending', 'Sent', 'Failed'] },
     emailSentAt: { type: Date, default: null },
     emailRecipient: { type: String, trim: true, default: null },
+
+    /** Sprint 9 (Gemini integration + demo data) — see Employee.js's
+        identical field for the full rationale. Set to 'ARNA_DEMO' only
+        by scripts/seedDemoData.js; every real salary record omits it. */
+    source: { type: String, default: null },
   },
   { timestamps: true }
 );

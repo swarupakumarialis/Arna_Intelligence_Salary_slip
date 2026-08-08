@@ -1,5 +1,6 @@
 import { AIProvider } from './AIProvider.js';
 import { INTENT, EMPLOYMENT_TYPES } from '../intents.js';
+import { isBlockedAction } from '../guard.js';
 
 /**
  * Version 1's default AIProvider — no external API, no key, runs fully
@@ -25,23 +26,6 @@ function money(amount, currency) {
 /* ============================================================
    INTENT DETECTION
    ============================================================ */
-
-/** Checked before anything else — a phrase matching any of these is
-    never dispatched to a service, regardless of what else it contains.
-    Base verb forms with \b word boundaries so past-tense read queries
-    ("invoices GENERATED this month", "salary emails SENT") never
-    false-positive: \bgenerate\b does not match inside "generated" (no
-    word boundary between "e" and "d"), same for \bsend\b vs "sent",
-    \bcreate\b vs "created", \bupload\b vs "uploaded", \bdelete\b vs
-    "deleted". */
-const BLOCKED_PATTERNS = [
-  /\bdelete\b/i,
-  /\bremove\b.*\b(employee|invoice|record)\b/i,
-  /\b(generate|create)\b.*\b(salary|payslip|slip|invoice)\b/i,
-  /\bsend\b.*\b(email|invoice|payslip|salary|slip)\b/i,
-  /\bupload\b/i,
-  /\b(edit|update|modify|change)\b.*\b(employee|invoice|record|status)\b/i,
-];
 
 const GREETING_RE = /^(hi|hello|hey|good morning|good afternoon|good evening)\b/i;
 const HELP_RE = /\b(help|what can you do|what do you do|how do (i|you) use)\b/i;
@@ -172,7 +156,7 @@ function classify(rawQuestion, context) { // eslint-disable-line no-unused-vars
   const q = rawQuestion.trim();
   const lower = q.toLowerCase();
 
-  if (BLOCKED_PATTERNS.some((re) => re.test(q))) {
+  if (isBlockedAction(q)) {
     return { intent: INTENT.BLOCKED_ACTION, entities: {} };
   }
 
