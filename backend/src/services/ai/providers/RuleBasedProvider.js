@@ -175,6 +175,14 @@ function classify(rawQuestion, context) { // eslint-disable-line no-unused-vars
   }
 
   // ── Employees ──────────────────────────────────────────
+  // Checked before extractEmployeeNameLookup below — "Who is currently
+  // working with us?" would otherwise match that function's "who is
+  // <name>" pattern and get misread as a lookup for someone literally
+  // named "currently working with us" (Sprint 9.1, Part 3).
+  if (/\bwork(ing)?\s+(with|for)\s+us\b|\bcurrently working\b|\bwho works here\b/.test(lower)) {
+    return { intent: INTENT.EMPLOYEE_COUNT, entities: { status: 'Active', employmentType: null, department: null } };
+  }
+
   const name = extractEmployeeNameLookup(q);
   if (name) return { intent: INTENT.EMPLOYEE_LOOKUP, entities: { name } };
 
@@ -191,7 +199,9 @@ function classify(rawQuestion, context) { // eslint-disable-line no-unused-vars
     const employmentType = extractEmploymentType(lower);
     const department = extractDepartment(q);
     const entities = { status, employmentType, department };
-    if (/\bhow many\b|\bcount\b|\bnumber of\b|\bshow\b|\blist\b|\ball\b|\bwho\b/.test(lower)) {
+    // "name" added (Sprint 9.1, Part 3) — "Name the active employees."
+    // has no how-many/show/list/who cue, only "name".
+    if (/\bhow many\b|\bcount\b|\bnumber of\b|\bshow\b|\blist\b|\ball\b|\bwho\b|\bname\b/.test(lower)) {
       return { intent: INTENT.EMPLOYEE_COUNT, entities };
     }
   }
@@ -203,8 +213,16 @@ function classify(rawQuestion, context) { // eslint-disable-line no-unused-vars
   // status word alone (paid/unpaid/outstanding/pending/overdue/draft/
   // sent/cancelled — see extractInvoiceStatus) is enough to enter this
   // block on its own, same as the literal word "invoice(s)".
+  //
+  // EXCEPT when the sentence is clearly about payroll email delivery
+  // instead — "How many salary emails were sent?" also contains the
+  // bare word "sent", which would otherwise send it here instead of to
+  // the Payroll section's own emails-sent/pending check below (Sprint
+  // 9.1 regression fix: this collision was real, caught by testing
+  // Part 11's exact required phrasing).
   const invoiceStatusHit = extractInvoiceStatus(lower);
-  if (/\binvoice(s)?\b/.test(lower) || invoiceStatusHit) {
+  const looksLikePayrollEmail = /\bsalary\b|\bpayroll\b|\bpayslip(s)?\b/.test(lower) && /\bemail(s)?\b/.test(lower);
+  if (/\binvoice(s)?\b/.test(lower) || (invoiceStatusHit && !looksLikePayrollEmail)) {
     if (/\bgenerated\b.*\bmonth\b|\bmonth\b.*\binvoice/.test(lower) || (/\bthis month\b/.test(lower) && /\binvoice/.test(lower))) {
       return { intent: INTENT.INVOICE_THIS_MONTH, entities: {} };
     }
@@ -246,9 +264,12 @@ function classify(rawQuestion, context) { // eslint-disable-line no-unused-vars
     if (/\bemployee\b.*\bcount\b|\bhow many\b.*\bemployee/.test(lower)) {
       return { intent: INTENT.PAYROLL_EMPLOYEE_COUNT, entities: {} };
     }
-    if (/\bgenerated\b|\bthis month\b/.test(lower)) {
-      return { intent: INTENT.PAYROLL_THIS_MONTH, entities: {} };
-    }
+    // Default for anything else payroll-related — "Payroll summary.",
+    // "How many salary records?", "Payroll this month?" all land here
+    // (Sprint 9.1, Part 11): PAYROLL_THIS_MONTH is the closest sensible
+    // reading of a bare payroll question, and it's better than a dead
+    // "I'm not sure" for a phrase that clearly IS about payroll.
+    return { intent: INTENT.PAYROLL_THIS_MONTH, entities: {} };
   }
   if (/\bdepartment(s)?\b.*\bhow many\b|\bhow many\b.*\bdepartment(s)?\b/.test(lower)) {
     return { intent: INTENT.PAYROLL_DEPARTMENT_COUNT, entities: {} };

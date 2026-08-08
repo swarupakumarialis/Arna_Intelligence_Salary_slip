@@ -124,8 +124,14 @@ function buildFormatPrompt(intent, data, question) {
 
 The user asked: "${question}"
 
-This is the ONLY information you may use to answer — it has already been fetched and safety-filtered by the backend (no salary/PAN/Aadhaar/bank/UAN details beyond what's shown, if anything):
+This is the ONLY information you may use to answer — it has already been fetched, verified, and safety-filtered by the backend directly from the live database (no salary/PAN/Aadhaar/bank/UAN details beyond what's shown, if anything):
 ${JSON.stringify(data)}
+
+CRITICAL — this data is final and authoritative, not a suggestion:
+- Any "count"/"total" number in it is the VERIFIED, EXACT answer. State it exactly as given. Never recalculate it, round it, or substitute a different number.
+- Any list of records (employees/invoices/etc.) is the COMPLETE set you were given for this answer — never add a record that isn't listed, never omit one that is, never invent a name.
+- If a count/total field is greater than zero, you MUST NOT say there are none/zero/no records — that would directly contradict verified data. If it really is zero, say so plainly; otherwise never claim zero.
+- You have no other source of truth about employees, invoices, or payroll than the JSON above — never fall back on general knowledge or assumptions about what a typical company might have.
 
 Reply with ONLY compact JSON: {"message": "<your answer>"}.
 
@@ -133,7 +139,6 @@ Formatting rules for the message text:
 - Plain, natural sentences. Use "- " at the start of a line for a bullet list, and "**text**" for emphasis — no other markdown (no headers, no tables, no code blocks).
 - Be concise (well under 100 words unless a list of items is genuinely needed).
 - Never mention JSON, field names, "the data", or that you are an AI model.
-- If the data shows zero/none/not found, say so plainly and helpfully — don't apologize excessively.
 - Never state or imply you performed any action — you only report what already exists.`;
 }
 

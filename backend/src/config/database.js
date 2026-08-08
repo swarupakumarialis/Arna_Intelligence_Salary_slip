@@ -44,3 +44,16 @@ export async function connectDB() {
 export function isDatabaseConnected() {
   return mongoose.connection.readyState === 1;
 }
+
+/** The connected database's NAME only (e.g. "arna_salary_suite") — the
+    one piece of `mongoose.connection` safe to expose on an
+    unauthenticated diagnostic endpoint. Deliberately not the host,
+    port, username, or anything else off `mongoose.connection` or
+    `mongoose.connection.getClient()`, none of which this function
+    touches — see GET /api/health (Sprint 9.1, Part 7), which needs a
+    way to confirm "which database am I actually talking to" without
+    ever being able to leak the connection string itself, even by
+    accident. Returns null while disconnected. */
+export function getDatabaseName() {
+  return isDatabaseConnected() ? mongoose.connection.name : null;
+}

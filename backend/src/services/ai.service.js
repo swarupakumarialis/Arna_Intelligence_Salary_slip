@@ -4,7 +4,7 @@ import * as salaryHistoryService from './salaryHistory.service.js';
 import * as storageService from './storage/storageService.js';
 import { verifyEmailTransporter } from './email.service.js';
 import { getAIProvider, getFallbackProvider } from './ai/providerFactory.js';
-import { INTENT, UNPAID_INVOICE_STATUSES, LIST_CAPABLE_INTENTS } from './ai/intents.js';
+import { INTENT, UNPAID_INVOICE_STATUSES, INVOICE_STATUSES, LIST_CAPABLE_INTENTS } from './ai/intents.js';
 import { isBlockedAction } from './ai/guard.js';
 
 /** Hard ceiling on how many records a "show all"/"name them" follow-up
@@ -137,15 +137,40 @@ function normalizeEmploymentType(value) {
   return known.find((t) => t.toLowerCase() === String(value).toLowerCase());
 }
 
+/** Same reasoning as normalizeEmploymentType, for Employee.status
+    (Sprint 9.1, Part 3/9 — a real bug this fixes): RuleBasedProvider's
+    own extractStatusKeyword() always produced the exact literal
+    'Active'/'Inactive' the schema expects, so this case-insensitive
+    resolution was never needed before Gemini became a second entity
+    source. Gemini's JSON has no guaranteed casing — "active" (lowercase)
+    is a perfectly reasonable thing for a model to write — and
+    Employee.status is an EXACT-match Mongoose enum, so an unnormalized
+    "active" silently matches zero documents instead of erroring,
+    which is exactly how "How many active employees?" can come back
+    with a false 0 despite real active employees existing. Anything
+    that doesn't resolve to a known status is dropped (no filter)
+    rather than querying with a value the schema can never match. */
+function normalizeEmployeeStatus(value) {
+  if (!value) return undefined;
+  const known = ['Active', 'Inactive'];
+  return known.find((s) => s.toLowerCase() === String(value).toLowerCase());
+}
+
 /** Maps an entities.status value from an invoice-related intent to
     what invoice.service.js's getInvoiceSummary/getAllInvoices expects:
-    the synthetic 'unpaid' group becomes the shared UNPAID_INVOICE_STATUSES
-    array (see ./ai/intents.js), a real status string passes through
-    unchanged, and no status means no filter (i.e. every invoice). */
+    the synthetic 'unpaid' group (case-insensitive — also matches
+    "outstanding"/"pending" the same way RuleBasedProvider's own
+    extractInvoiceStatus does) becomes the shared UNPAID_INVOICE_STATUSES
+    array (see ./ai/intents.js); a real status is resolved
+    case-insensitively against Invoice.status's actual enum (same
+    normalizeEmployeeStatus reasoning above — Gemini's "paid" must
+    still match the schema's "Paid"); anything else (including no
+    status) means no filter. */
 function resolveInvoiceStatusFilter(status) {
   if (!status) return undefined;
-  if (status === 'unpaid') return UNPAID_INVOICE_STATUSES;
-  return status;
+  const lower = String(status).toLowerCase();
+  if (lower === 'unpaid' || lower === 'outstanding' || lower === 'pending') return UNPAID_INVOICE_STATUSES;
+  return INVOICE_STATUSES.find((s) => s.toLowerCase() === lower);
 }
 
 async function resolveData(intent, entities, context, options = {}) {
@@ -169,7 +194,7 @@ async function resolveData(intent, entities, context, options = {}) {
     // automatically when the total is small, without a second round-trip.
     case INTENT.EMPLOYEE_COUNT: {
       const filters = {
-        status: entities.status,
+        status: normalizeEmployeeStatus(entities.status),
         employmentType: normalizeEmploymentType(entities.employmentType),
         department: entities.department,
       };
@@ -361,16 +386,50 @@ async function detectIntentWithFallback(provider, trimmed, extra) {
   }
 }
 
+/** The one verified number resolveData() attached for this intent, if
+    any — every count-bearing intent's data shape uses either `count`
+    or `total` (see resolveData's cases below). Anything else (a
+    lookup, a boolean status, null) has nothing numeric to fact-check,
+    so there's nothing for the check below to do. */
+function extractCheckableNumber(data) {
+  if (!data || typeof data !== 'object') return null;
+  if (typeof data.count === 'number') return data.count;
+  if (typeof data.total === 'number') return data.total;
+  return null;
+}
+
+/** Sprint 9.1 (Part 9/10/11) — a real, backend-enforced guarantee that
+    an LLM provider's phrasing can never contradict the verified number
+    ai.service.js already fetched, not just a prompt instruction the
+    model might ignore. If resolveData() attached a checkable count/
+    total and the provider's own message text doesn't mention that
+    exact number anywhere, the message is treated as untrustworthy
+    (mismatched, hallucinated, or a "sorry, no records found" ignoring
+    data it was actually given) and RuleBasedProvider — which builds
+    its reply directly and deterministically from the same `data`, so
+    it cannot get this wrong — answers instead. */
+function messageMatchesVerifiedCount(message, data) {
+  const n = extractCheckableNumber(data);
+  if (n === null) return true;
+  return String(message).includes(String(n));
+}
+
 /** Same fallback contract as detectIntentWithFallback, for the
     formatResponse half of the pipeline — e.g. Gemini classified the
-    question fine but then the format call itself times out. Guards
-    against retrying forever: if `provider` already IS the fallback,
-    a second failure just propagates. */
+    question fine but then the format call itself times out, or (Part 9)
+    returned text that contradicts the verified count it was given.
+    Guards against retrying forever: if `provider` already IS the
+    fallback, a second failure just propagates. */
 async function formatResponseWithFallback(provider, intent, data, trimmed) {
+  const fallback = getFallbackProvider();
   try {
-    return await provider.formatResponse(intent, data, trimmed);
+    const message = await provider.formatResponse(intent, data, trimmed);
+    if (provider !== fallback && !messageMatchesVerifiedCount(message, data)) {
+      logProviderFallback('formatResponse', new Error('response text did not include the verified count/total — rejecting as a possible data-fidelity issue'));
+      return fallback.formatResponse(intent, data, trimmed);
+    }
+    return message;
   } catch (err) {
-    const fallback = getFallbackProvider();
     if (provider === fallback) throw err;
     logProviderFallback('formatResponse', err);
     return fallback.formatResponse(intent, data, trimmed);
